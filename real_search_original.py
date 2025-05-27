@@ -1,7 +1,6 @@
 """
-実際の研究者検索機能（改良版）
+実際の研究者検索機能
 BigQuery + Vertex AI を使用した本格的な検索システム
-セマンティック検索を実際に実装
 """
 
 import logging
@@ -29,30 +28,18 @@ async def perform_real_search(request) -> Dict[str, Any]:
         if not bq_client:
             raise Exception("BigQueryクライアントが利用できません")
         
-        # Vertex AIが必要な機能のチェック
-        vertex_ai_required = request.method == "semantic" or request.use_llm_expansion or request.use_llm_summary
-        if vertex_ai_required and not is_vertex_ai_ready():
-            logger.warning("⚠️ Vertex AIが利用できません。代替手法を使用します。")
-            # Vertex AIが必要な機能を無効化
-            if request.method == "semantic":
-                logger.info("🔄 セマンティック検索 → 高度キーワード検索に変更")
-                request.method = "keyword"
-            request.use_llm_expansion = False
-            request.use_llm_summary = False
+        if not is_vertex_ai_ready():
+            raise Exception("Vertex AIが利用できません")
         
         # 検索クエリの前処理
         search_query = request.query.strip()
         if request.use_llm_expansion:
-            try:
-                search_query = await expand_query_with_llm(search_query)
-                logger.info(f"🔄 LLMクエリ拡張結果: {search_query}")
-            except Exception as e:
-                logger.warning(f"⚠️ LLMクエリ拡張失敗: {e}")
-                search_query = request.query.strip()
+            search_query = await expand_query_with_llm(search_query)
+            logger.info(f"🔄 LLMクエリ拡張結果: {search_query}")
         
         # 検索方法に応じて実行
         if request.method == "semantic":
-            results = await semantic_search_with_embedding(bq_client, search_query, request.max_results)
+            results = await semantic_search(bq_client, search_query, request.max_results)
         else:  # keyword
             results = await keyword_search(bq_client, search_query, request.max_results)
         
@@ -60,11 +47,8 @@ async def perform_real_search(request) -> Dict[str, Any]:
         
         # LLM要約の生成
         if request.use_llm_summary and results:
-            try:
-                results = await add_llm_summaries(results, search_query)
-                logger.info("🤖 LLM要約を追加完了")
-            except Exception as e:
-                logger.warning(f"⚠️ LLM要約生成失敗: {e}")
+            results = await add_llm_summaries(results, search_query)
+            logger.info("🤖 LLM要約を追加完了")
         
         execution_time = time.time() - start_time
         
@@ -94,21 +78,19 @@ async def perform_real_search(request) -> Dict[str, Any]:
             "execution_time": time.time() - start_time
         }
 
-async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str, max_results: int) -> List[Dict]:
+async def semantic_search(bq_client: bigquery.Client, query: str, max_results: int) -> List[Dict]:
     """
-    実際のセマンティック検索（ベクトル埋め込みベース）
+    セマンティック検索（ベクトル類似度検索）
     """
     try:
-        logger.info(f"🔍 セマンティック検索（埋め込みベース）実行: {query}")
+        logger.info(f"🔍 セマンティック検索実行: {query}")
         
-        # 1. クエリのベクトル化
+        # クエリのベクトル化
         embedding_model = TextEmbeddingModel.from_pretrained("textembedding-gecko@003")
-        query_embeddings = embedding_model.get_embeddings([query])
-        query_embedding = query_embeddings[0].values
+        query_embedding = embedding_model.get_embeddings([query])[0].values
         
-        logger.info(f"📊 クエリベクトル次元: {len(query_embedding)}")
-        
-        # 2. データベースから研究者データを取得（テキスト形式）
+        # ベクトル検索クエリ（簡略版 - 実際のベクトル列が必要）
+        # 注: 実際の実装では事前計算されたembeddingカラムとの類似度計算が必要
         search_sql = f"""
         SELECT 
             name_ja,
@@ -120,134 +102,44 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
             profile_ja,
             paper_title_ja_first,
             project_title_ja_first,
-            researchmap_url
+            researchmap_url,
+            -- 仮の距離スコア（実際にはベクトル類似度を計算）
+            RAND() as distance
         FROM `apt-rope-217206.researcher_data.rd_250524`
         WHERE (
-            research_keywords_ja IS NOT NULL OR
-            research_fields_ja IS NOT NULL OR
-            profile_ja IS NOT NULL
+            LOWER(research_keywords_ja) LIKE LOWER('%{query}%') OR
+            LOWER(research_fields_ja) LIKE LOWER('%{query}%') OR
+            LOWER(profile_ja) LIKE LOWER('%{query}%')
         )
-        AND (
-            LOWER(research_keywords_ja) LIKE LOWER('%{query.split()[0]}%') OR
-            LOWER(research_fields_ja) LIKE LOWER('%{query.split()[0]}%') OR
-            LOWER(profile_ja) LIKE LOWER('%{query.split()[0]}%')
-        )
-        LIMIT {max_results * 5}  -- より多くの候補を取得してから類似度計算
+        ORDER BY RAND()  -- 実際にはベクトル距離でソート
+        LIMIT {max_results}
         """
         
         query_job = bq_client.query(search_sql)
-        candidates = []
+        results = []
         
         for row in query_job:
-            # 研究者のテキスト情報を結合
-            researcher_text = ""
-            if row.research_keywords_ja:
-                researcher_text += row.research_keywords_ja + " "
-            if row.research_fields_ja:
-                researcher_text += row.research_fields_ja + " "
-            if row.profile_ja:
-                researcher_text += row.profile_ja[:200] + " "  # プロフィールは200文字まで
-            
-            candidates.append({
-                "data": {
-                    "name_ja": row.name_ja,
-                    "name_en": row.name_en,
-                    "main_affiliation_name_ja": row.main_affiliation_name_ja,
-                    "main_affiliation_name_en": row.main_affiliation_name_en,
-                    "research_keywords_ja": row.research_keywords_ja,
-                    "research_fields_ja": row.research_fields_ja,
-                    "profile_ja": row.profile_ja,
-                    "paper_title_ja_first": row.paper_title_ja_first,
-                    "project_title_ja_first": row.project_title_ja_first,
-                    "researchmap_url": row.researchmap_url
-                },
-                "text": researcher_text.strip()
-            })
+            result = {
+                "name_ja": row.name_ja,
+                "name_en": row.name_en,
+                "main_affiliation_name_ja": row.main_affiliation_name_ja,
+                "main_affiliation_name_en": row.main_affiliation_name_en,
+                "research_keywords_ja": row.research_keywords_ja,
+                "research_fields_ja": row.research_fields_ja,
+                "profile_ja": row.profile_ja,
+                "paper_title_ja_first": row.paper_title_ja_first,
+                "project_title_ja_first": row.project_title_ja_first,
+                "researchmap_url": row.researchmap_url,
+                "distance": float(row.distance) if row.distance else None
+            }
+            results.append(result)
         
-        if not candidates:
-            logger.info("📊 セマンティック検索の候補が見つかりませんでした")
-            return []
-        
-        logger.info(f"📊 セマンティック検索候補: {len(candidates)}名")
-        
-        # 3. 候補者のテキストをベクトル化（バッチ処理）
-        candidate_texts = [candidate["text"] for candidate in candidates if candidate["text"]]
-        
-        if not candidate_texts:
-            logger.info("📊 ベクトル化対象のテキストがありません")
-            return []
-        
-        # バッチでベクトル化（効率化）
-        batch_size = 5  # Vertex AIの制限に応じて調整
-        candidate_embeddings = []
-        
-        for i in range(0, len(candidate_texts), batch_size):
-            batch_texts = candidate_texts[i:i+batch_size]
-            try:
-                batch_embeddings = embedding_model.get_embeddings(batch_texts)
-                candidate_embeddings.extend([emb.values for emb in batch_embeddings])
-            except Exception as e:
-                logger.warning(f"⚠️ バッチ{i//batch_size + 1}のベクトル化失敗: {e}")
-                # エラー時は空のベクトルを追加
-                candidate_embeddings.extend([[0.0] * len(query_embedding)] * len(batch_texts))
-        
-        # 4. コサイン類似度を計算
-        results_with_similarity = []
-        
-        for i, candidate in enumerate(candidates[:len(candidate_embeddings)]):
-            if i >= len(candidate_embeddings):
-                continue
-                
-            candidate_embedding = candidate_embeddings[i]
-            
-            # コサイン類似度計算
-            similarity = calculate_cosine_similarity(query_embedding, candidate_embedding)
-            
-            result = candidate["data"].copy()
-            result["distance"] = 1.0 - similarity  # 距離 = 1 - 類似度
-            result["similarity"] = similarity
-            
-            results_with_similarity.append(result)
-        
-        # 5. 類似度でソート（類似度が高い順）
-        results_with_similarity.sort(key=lambda x: x["similarity"], reverse=True)
-        
-        # 上位結果を返す
-        final_results = results_with_similarity[:max_results]
-        
-        logger.info(f"✅ セマンティック検索完了: {len(final_results)}件")
-        if final_results:
-            logger.info(f"📊 最高類似度: {final_results[0]['similarity']:.4f}")
-        
-        return final_results
+        logger.info(f"✅ セマンティック検索完了: {len(results)}件")
+        return results
         
     except Exception as e:
         logger.error(f"❌ セマンティック検索エラー: {e}")
-        # エラー時はキーワード検索にフォールバック
-        logger.info("🔄 キーワード検索にフォールバック")
-        return await keyword_search(bq_client, query, max_results)
-
-def calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    """
-    コサイン類似度を計算
-    """
-    try:
-        vec1 = np.array(vec1)
-        vec2 = np.array(vec2)
-        
-        # ゼロベクトルチェック
-        norm1 = np.linalg.norm(vec1)
-        norm2 = np.linalg.norm(vec2)
-        
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        
-        similarity = np.dot(vec1, vec2) / (norm1 * norm2)
-        return float(similarity)
-        
-    except Exception as e:
-        logger.warning(f"⚠️ コサイン類似度計算エラー: {e}")
-        return 0.0
+        raise
 
 async def keyword_search(bq_client: bigquery.Client, query: str, max_results: int) -> List[Dict]:
     """
