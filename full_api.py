@@ -1,3 +1,51 @@
+@app.get("/test/gcp")
+async def test_gcp_connection():
+    """シンプルGCP接続テスト"""
+    test_results = {
+        "timestamp": time.time(),
+        "project_id": PROJECT_ID,
+        "location": LOCATION,
+        "tests": {}
+    }
+    
+    # BigQuery接続テスト
+    try:
+        from google.cloud import bigquery
+        bq_client = bigquery.Client(project=PROJECT_ID)
+        
+        # シンプルクエリ実行
+        query = f"SELECT COUNT(*) as total FROM `{BIGQUERY_TABLE}` LIMIT 1"
+        query_job = bq_client.query(query)
+        results = list(query_job.result())
+        
+        test_results["tests"]["bigquery"] = {
+            "status": "✅ 成功",
+            "total_researchers": results[0].total if results else 0
+        }
+        
+    except Exception as e:
+        test_results["tests"]["bigquery"] = {
+            "status": "❌ 失敗",
+            "error": str(e)
+        }
+    
+    # Vertex AI接続テスト
+    try:
+        from google.cloud import aiplatform
+        aiplatform.init(project=PROJECT_ID, location=LOCATION)
+        
+        test_results["tests"]["vertex_ai"] = {
+            "status": "✅ 初期化成功"
+        }
+        
+    except Exception as e:
+        test_results["tests"]["vertex_ai"] = {
+            "status": "❌ 失敗",
+            "error": str(e)
+        }
+    
+    return test_results
+
 """
 研究者検索API - 完全版
 基本サーバーに検索機能を段階的に追加
@@ -145,13 +193,28 @@ async def test_endpoint():
 @app.post("/api/search", response_model=SearchResponse)
 async def search_researchers(request: SearchRequest):
     """
-    研究者検索APIエンドポイント（現在はモック応答）
+    研究者検索APIエンドポイント（実際の検索 + フォールバック）
     """
     start_time = time.time()
     
     logger.info(f"🔍 検索リクエスト受信: {request.query}, method: {request.method}")
     
-    # 現在はモック応答を返す
+    # 実際の検索を試行し、失敗した場合はモックにフォールバック
+    try:
+        # 実際の検索を試行
+        from real_search import perform_real_search
+        result = await perform_real_search(request)
+        
+        if result["status"] == "success":
+            logger.info(f"✅ 実際の検索成功: {len(result['results'])}件")
+            return SearchResponse(**result)
+        else:
+            logger.warning(f"⚠️ 実際の検索失敗、モックにフォールバック: {result.get('error_message')}")
+            
+    except Exception as e:
+        logger.warning(f"⚠️ 実際の検索でエラー、モックにフォールバック: {e}")
+    
+    # モック検索（フォールバック）
     mock_results = []
     
     if request.query:
@@ -198,7 +261,7 @@ async def search_researchers(request: SearchRequest):
     execution_time = time.time() - start_time
     
     # 実行情報の生成
-    executed_query_info = f"モック検索実行 (方法: {request.method}"
+    executed_query_info = f"モック検索実行（実際の検索は準備中） (方法: {request.method}"
     if request.use_llm_expansion:
         executed_query_info += ", キーワード拡張: ON"
     if request.use_llm_summary:
@@ -215,7 +278,7 @@ async def search_researchers(request: SearchRequest):
         executed_query_info=executed_query_info
     )
     
-    logger.info(f"✅ 検索完了: {len(mock_results)}件, {execution_time:.2f}秒")
+    logger.info(f"✅ モック検索完了: {len(mock_results)}件, {execution_time:.2f}秒")
     return response
 
 @app.get("/api/search", response_model=SearchResponse)
