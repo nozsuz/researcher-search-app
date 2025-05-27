@@ -6,6 +6,8 @@ from vertexai.generative_models import GenerativeModel, Part
 from vertexai.language_models import TextEmbeddingModel
 import os
 import time
+import json
+from google.oauth2 import service_account
 
 # ページ設定
 st.set_page_config(
@@ -45,11 +47,125 @@ DISPLAY_COLUMNS = [
 def initialize_clients():
     """Google Cloud クライアントの初期化（キャッシュ化）"""
     try:
+        # Google Cloud認証の設定
+        credentials = None
+        
+        # 方法1: 環境変数からJSON文字列を取得
+        if os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON"):
+            try:
+                credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+                
+                # デバッグ：JSON文字列の詳細確認
+                json_length = len(credentials_json)
+                json_preview = credentials_json[:50] + "..." + credentials_json[-50:]
+                st.write(f"📊 JSON長さ: {json_length} 文字")
+                st.write(f"📋 JSON プレビュー: {json_preview}")
+                
+                # 不要な引用符の除去（三重引用符対応）
+                credentials_json = credentials_json.strip()
+                if credentials_json.startswith('"""') and credentials_json.endswith('"""'):
+                    credentials_json = credentials_json[3:-3]
+                    st.info("🔧 三重引用符を削除しました")
+                elif credentials_json.startswith('"') and credentials_json.endswith('"'):
+                    credentials_json = credentials_json[1:-1]
+                    st.info("🔧 引用符を削除しました")
+                
+                # JSON形式の基本チェック
+                credentials_json = credentials_json.strip()
+                if not credentials_json.startswith('{') or not credentials_json.endswith('}'):
+                    st.error("❌ JSON形式エラー: 開始または終了括弧が不正です")
+                    st.write(f"開始文字: '{credentials_json[:10]}'")
+                    st.write(f"終了文字: '{credentials_json[-10:]}'")
+                    return None, None, None, None
+                
+                # 改行文字の処理
+                # \\n → \n の変換（Streamlit Secrets形式と同じ）
+                if '\\n' in credentials_json:
+                    credentials_json = credentials_json.replace('\\n', '\n')
+                    st.info("🔧 改行文字を変換しました (\\\\n → \\n)")
+                
+                # JSONパース
+                credentials_dict = json.loads(credentials_json)
+                
+                # 必須フィールドの確認
+                required_fields = ['type', 'project_id', 'private_key', 'client_email']
+                missing_fields = [field for field in required_fields if field not in credentials_dict]
+                if missing_fields:
+                    st.error(f"❌ 必須フィールドが不足: {missing_fields}")
+                    return None, None, None, None
+                
+                # private_keyの形式確認
+                private_key = credentials_dict.get('private_key', '')
+                if '-----BEGIN PRIVATE KEY-----' not in private_key:
+                    st.error("❌ private_keyの形式が不正です")
+                    return None, None, None, None
+                
+                # 認証情報の作成
+                credentials = service_account.Credentials.from_service_account_info(
+                    credentials_dict,
+                    scopes=[
+                        "https://www.googleapis.com/auth/cloud-platform",
+                        "https://www.googleapis.com/auth/bigquery"
+                    ]
+                )
+                st.success("✅ 環境変数から認証情報を読み込みました")
+                st.write(f"🏢 プロジェクトID: {credentials_dict.get('project_id')}")
+                st.write(f"📧 サービスアカウント: {credentials_dict.get('client_email')}")
+                
+            except json.JSONDecodeError as je:
+                st.error(f"❌ JSONパースエラー: {je}")
+                st.write("💡 JSONの形式を確認してください（改行、引用符、カンマなど）")
+                # エラー箇所を表示
+                if hasattr(je, 'pos') and os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
+                    error_context = credentials_json[max(0, je.pos-30):je.pos+30]
+                    st.code(f"エラー箇所付近: ...{error_context}...")
+                return None, None, None, None
+            except Exception as e:
+                st.error(f"❌ 認証情報読み込みエラー: {e}")
+                return None, None, None, None
+        
+        # 方法2: 秘密鍵を別の環境変数で設定
+        elif all([os.getenv("GCP_PROJECT_ID"), os.getenv("GCP_PRIVATE_KEY"), os.getenv("GCP_CLIENT_EMAIL")]):
+            try:
+                import base64
+                # Base64デコードした秘密鍵を使用
+                private_key = base64.b64decode(os.getenv("GCP_PRIVATE_KEY")).decode('utf-8')
+                
+                credentials_dict = {
+                    "type": "service_account",
+                    "project_id": os.getenv("GCP_PROJECT_ID"),
+                    "private_key_id": os.getenv("GCP_PRIVATE_KEY_ID", ""),
+                    "private_key": private_key,
+                    "client_email": os.getenv("GCP_CLIENT_EMAIL"),
+                    "client_id": os.getenv("GCP_CLIENT_ID", ""),
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                    "universe_domain": "googleapis.com"
+                }
+                
+                credentials = service_account.Credentials.from_service_account_info(
+                    credentials_dict,
+                    scopes=[
+                        "https://www.googleapis.com/auth/cloud-platform",
+                        "https://www.googleapis.com/auth/bigquery"
+                    ]
+                )
+                st.success("✅ 分割した環境変数から認証情報を読み込みました")
+            except Exception as e:
+                st.error(f"分割環境変数からの認証情報読み込みエラー: {e}")
+        
         # Vertex AI 初期化
-        vertexai.init(project=PROJECT_ID, location=LOCATION)
+        if credentials:
+            vertexai.init(project=PROJECT_ID, location=LOCATION, credentials=credentials)
+        else:
+            vertexai.init(project=PROJECT_ID, location=LOCATION)
         
         # BigQuery クライアント初期化
-        bq_client = bigquery.Client(project=PROJECT_ID)
+        if credentials:
+            bq_client = bigquery.Client(project=PROJECT_ID, credentials=credentials)
+        else:
+            bq_client = bigquery.Client(project=PROJECT_ID)
         
         # LLM モデル初期化
         main_llm_model = GenerativeModel(MAIN_LLM_MODEL_NAME)
@@ -61,7 +177,43 @@ def initialize_clients():
         return bq_client, main_llm_model, summary_llm_model, embedding_model
     except Exception as e:
         st.error(f"初期化エラー: {e}")
+        # デバッグ情報を表示
+        st.write("**デバッグ情報:**")
+        st.write(f"PROJECT_ID: {PROJECT_ID}")
+        st.write(f"LOCATION: {LOCATION}")
+        st.write(f"GOOGLE_APPLICATION_CREDENTIALS_JSON が設定されているか: {'Yes' if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON') else 'No'}")
+        if os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
+            json_preview = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')[:100] + "..."
+            st.write(f"JSONプレビュー: {json_preview}")
+        if os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+            st.write(f"GOOGLE_APPLICATION_CREDENTIALS: {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}")
         return None, None, None, None
+
+def test_permissions(bq_client, embedding_model):
+    """権限テスト用の関数"""
+    st.write("## 🔍 権限テスト")
+    
+    # BigQuery権限テスト
+    try:
+        # シンプルなクエリでテーブルアクセスをテスト
+        test_query = f"SELECT COUNT(*) as total_records FROM `{BIGQUERY_TABLE}` LIMIT 1"
+        result = bq_client.query(test_query).to_dataframe()
+        st.success(f"✅ BigQueryアクセス成功: {result['total_records'].iloc[0]:,}件のレコード")
+    except Exception as e:
+        st.error(f"❌ BigQueryアクセスエラー: {e}")
+    
+    # Vertex AI 権限テスト
+    try:
+        # シンプルなエンベディングテスト
+        test_embedding = embedding_model.get_embeddings(["テスト"])
+        if test_embedding and len(test_embedding) > 0:
+            st.success(f"✅ Vertex AIアクセス成功: エンベディング次元数 {len(test_embedding[0].values)}")
+        else:
+            st.error("❌ Vertex AI: エンベディング取得失敗")
+    except Exception as e:
+        st.error(f"❌ Vertex AIアクセスエラー: {e}")
+    
+    st.write("---")
 
 def expand_keywords_with_llm(original_keyword, model, search_target_columns_hint=""):
     """メインLLMを使って検索キーワードを拡張する"""
@@ -374,6 +526,10 @@ def main():
                 st.session_state.embedding_model = embedding_model
                 st.session_state.initialized = True
                 st.success("✅ 初期化完了！")
+                
+                # 権限テストを実行
+                with st.expander("🔍 権限テスト結果を表示"):
+                    test_permissions(bq_client, embedding_model)
             else:
                 st.error("❌ 初期化に失敗しました。設定を確認してください。")
                 return
