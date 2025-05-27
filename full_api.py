@@ -1,51 +1,3 @@
-@app.get("/test/gcp")
-async def test_gcp_connection():
-    """シンプルGCP接続テスト"""
-    test_results = {
-        "timestamp": time.time(),
-        "project_id": PROJECT_ID,
-        "location": LOCATION,
-        "tests": {}
-    }
-    
-    # BigQuery接続テスト
-    try:
-        from google.cloud import bigquery
-        bq_client = bigquery.Client(project=PROJECT_ID)
-        
-        # シンプルクエリ実行
-        query = f"SELECT COUNT(*) as total FROM `{BIGQUERY_TABLE}` LIMIT 1"
-        query_job = bq_client.query(query)
-        results = list(query_job.result())
-        
-        test_results["tests"]["bigquery"] = {
-            "status": "✅ 成功",
-            "total_researchers": results[0].total if results else 0
-        }
-        
-    except Exception as e:
-        test_results["tests"]["bigquery"] = {
-            "status": "❌ 失敗",
-            "error": str(e)
-        }
-    
-    # Vertex AI接続テスト
-    try:
-        from google.cloud import aiplatform
-        aiplatform.init(project=PROJECT_ID, location=LOCATION)
-        
-        test_results["tests"]["vertex_ai"] = {
-            "status": "✅ 初期化成功"
-        }
-        
-    except Exception as e:
-        test_results["tests"]["vertex_ai"] = {
-            "status": "❌ 失敗",
-            "error": str(e)
-        }
-    
-    return test_results
-
 """
 研究者検索API - 完全版
 基本サーバーに検索機能を段階的に追加
@@ -172,7 +124,8 @@ async def health_check():
             "/": "✅ 利用可能",
             "/health": "✅ 利用可能", 
             "/test": "✅ 利用可能",
-            "/api/search": "🔄 準備中（モック応答あり）"
+            "/api/search": "🔄 準備中（モック応答あり）",
+            "/test/gcp": "✅ 利用可能"
         }
     }
     return health_status
@@ -189,6 +142,54 @@ async def test_endpoint():
             "timestamp": time.time()
         }
     }
+
+@app.get("/test/gcp")
+async def test_gcp_connection():
+    """シンプルGCP接続テスト"""
+    test_results = {
+        "timestamp": time.time(),
+        "project_id": PROJECT_ID,
+        "location": LOCATION,
+        "tests": {}
+    }
+    
+    # BigQuery接続テスト
+    try:
+        from google.cloud import bigquery
+        bq_client = bigquery.Client(project=PROJECT_ID)
+        
+        # シンプルクエリ実行
+        query = f"SELECT COUNT(*) as total FROM `{BIGQUERY_TABLE}` LIMIT 1"
+        query_job = bq_client.query(query)
+        results = list(query_job.result())
+        
+        test_results["tests"]["bigquery"] = {
+            "status": "✅ 成功",
+            "total_researchers": results[0].total if results else 0
+        }
+        
+    except Exception as e:
+        test_results["tests"]["bigquery"] = {
+            "status": "❌ 失敗",
+            "error": str(e)
+        }
+    
+    # Vertex AI接続テスト
+    try:
+        from google.cloud import aiplatform
+        aiplatform.init(project=PROJECT_ID, location=LOCATION)
+        
+        test_results["tests"]["vertex_ai"] = {
+            "status": "✅ 初期化成功"
+        }
+        
+    except Exception as e:
+        test_results["tests"]["vertex_ai"] = {
+            "status": "❌ 失敗",
+            "error": str(e)
+        }
+    
+    return test_results
 
 @app.post("/api/search", response_model=SearchResponse)
 async def search_researchers(request: SearchRequest):
