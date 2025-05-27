@@ -50,10 +50,16 @@ async def perform_real_search(request) -> Dict[str, Any]:
         
         # 検索クエリの前処理
         search_query = request.query.strip()
+        expanded_info = None  # 拡張情報を保存
+        
         if request.use_llm_expansion and vertex_ai_available:
             try:
                 expanded_query = await expand_query_with_llm(search_query)
                 if expanded_query and expanded_query != search_query:
+                    expanded_info = {
+                        "original_query": search_query,
+                        "expanded_query": expanded_query
+                    }
                     search_query = expanded_query
                     logger.info(f"🔄 LLMクエリ拡張結果: {search_query}")
                 else:
@@ -95,7 +101,8 @@ async def perform_real_search(request) -> Dict[str, Any]:
             "results": results,
             "total": len(results),
             "execution_time": execution_time,
-            "executed_query_info": executed_query_info
+            "executed_query_info": executed_query_info,
+            "expanded_info": expanded_info  # 拡張情報を追加
         }
         
     except Exception as e:
