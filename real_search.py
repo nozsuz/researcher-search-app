@@ -1,7 +1,7 @@
 """
-実際の研究者検索機能（改良版）
+実際の研究者検索機能（LLM修正版）
 BigQuery + Vertex AI を使用した本格的な検索システム
-セマンティック検索を実際に実装
+LLM機能の安定性を向上
 """
 
 import logging
@@ -31,7 +31,9 @@ async def perform_real_search(request) -> Dict[str, Any]:
         
         # Vertex AIが必要な機能のチェック
         vertex_ai_required = request.method == "semantic" or request.use_llm_expansion or request.use_llm_summary
-        if vertex_ai_required and not is_vertex_ai_ready():
+        vertex_ai_available = is_vertex_ai_ready()
+        
+        if vertex_ai_required and not vertex_ai_available:
             logger.warning("⚠️ Vertex AIが利用できません。代替手法を使用します。")
             # Vertex AIが必要な機能を無効化
             if request.method == "semantic":
@@ -40,18 +42,27 @@ async def perform_real_search(request) -> Dict[str, Any]:
             request.use_llm_expansion = False
             request.use_llm_summary = False
         
+        # セマンティック検索時はクエリ拡張を無効化
+        if request.method == "semantic":
+            request.use_llm_expansion = False
+            logger.info("🔄 セマンティック検索時はクエリ拡張を無効化")
+        
         # 検索クエリの前処理
         search_query = request.query.strip()
-        if request.use_llm_expansion:
+        if request.use_llm_expansion and vertex_ai_available:
             try:
-                search_query = await expand_query_with_llm(search_query)
-                logger.info(f"🔄 LLMクエリ拡張結果: {search_query}")
+                expanded_query = await expand_query_with_llm(search_query)
+                if expanded_query and expanded_query != search_query:
+                    search_query = expanded_query
+                    logger.info(f"🔄 LLMクエリ拡張結果: {search_query}")
+                else:
+                    logger.info("🔄 LLMクエリ拡張: 変更なし")
             except Exception as e:
                 logger.warning(f"⚠️ LLMクエリ拡張失敗: {e}")
                 search_query = request.query.strip()
         
         # 検索方法に応じて実行
-        if request.method == "semantic":
+        if request.method == "semantic" and vertex_ai_available:
             results = await semantic_search_with_embedding(bq_client, search_query, request.max_results)
         else:  # keyword
             results = await keyword_search(bq_client, search_query, request.max_results)
@@ -59,9 +70,9 @@ async def perform_real_search(request) -> Dict[str, Any]:
         logger.info(f"📊 検索結果: {len(results)}件")
         
         # LLM要約の生成
-        if request.use_llm_summary and results:
+        if request.use_llm_summary and results and vertex_ai_available:
             try:
-                results = await add_llm_summaries(results, search_query)
+                results = await add_llm_summaries(results, request.query)  # 元のクエリを使用
                 logger.info("🤖 LLM要約を追加完了")
             except Exception as e:
                 logger.warning(f"⚠️ LLM要約生成失敗: {e}")
@@ -70,9 +81,9 @@ async def perform_real_search(request) -> Dict[str, Any]:
         
         # 実行情報を生成
         executed_query_info = f"実際のGCP検索実行 (方法: {request.method}"
-        if request.use_llm_expansion:
+        if request.use_llm_expansion and vertex_ai_available and request.method != "semantic":
             executed_query_info += ", キーワード拡張: ON"
-        if request.use_llm_summary:
+        if request.use_llm_summary and vertex_ai_available:
             executed_query_info += ", AI要約: ON"
         executed_query_info += f", 実行時間: {execution_time:.2f}秒)"
         
@@ -102,13 +113,14 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         logger.info(f"🔍 セマンティック検索（埋め込みベース）実行: {query}")
         
         # 1. クエリのベクトル化
-        embedding_model = TextEmbeddingModel.from_pretrained("textembedding-gecko@003")
+        embedding_model = TextEmbeddingModel.from_pretrained("text-multilingual-embedding-002")
         query_embeddings = embedding_model.get_embeddings([query])
         query_embedding = query_embeddings[0].values
         
         logger.info(f"📊 クエリベクトル次元: {len(query_embedding)}")
         
         # 2. データベースから研究者データを取得（テキスト形式）
+        first_keyword = query.split()[0] if query.split() else query
         search_sql = f"""
         SELECT 
             name_ja,
@@ -128,9 +140,9 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
             profile_ja IS NOT NULL
         )
         AND (
-            LOWER(research_keywords_ja) LIKE LOWER('%{query.split()[0]}%') OR
-            LOWER(research_fields_ja) LIKE LOWER('%{query.split()[0]}%') OR
-            LOWER(profile_ja) LIKE LOWER('%{query.split()[0]}%')
+            LOWER(research_keywords_ja) LIKE LOWER('%{first_keyword}%') OR
+            LOWER(research_fields_ja) LIKE LOWER('%{first_keyword}%') OR
+            LOWER(profile_ja) LIKE LOWER('%{first_keyword}%')
         )
         LIMIT {max_results * 5}  -- より多くの候補を取得してから類似度計算
         """
@@ -321,78 +333,87 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
 
 async def expand_query_with_llm(query: str) -> str:
     """
-    LLMを使用してクエリを拡張
+    LLMを使用してクエリを拡張（改良版）
     """
     try:
         logger.info(f"🤖 LLMクエリ拡張開始: {query}")
         
-        model = TextGenerationModel.from_pretrained("gemini-1.0-pro")
+        # Gemini 2.0 Flashでクエリ拡張
+        model = TextGenerationModel.from_pretrained("gemini-2.0-flash-001")
         
-        prompt = f"""
-以下の研究キーワードに関連する追加的なキーワードを生成してください。
+        prompt = f"""研究キーワード「{query}」に関連する学術用語を3-5個追加して、より効果的な検索クエリを作成してください。
+
 元のキーワード: {query}
 
-関連する学術用語、類義語、関連分野のキーワードを3-5個追加して、
-検索に有効な拡張されたクエリを作成してください。
-
-拡張クエリ（元のキーワード + 関連キーワード）:
-"""
+拡張されたクエリ (元のキーワード + 関連用語):"""
         
         response = model.predict(
             prompt,
-            temperature=0.3,
-            max_output_tokens=200
+            temperature=0.2,  # より安定した出力
+            max_output_tokens=100,
+            top_p=0.8,
+            top_k=40
         )
         
         expanded_query = response.text.strip()
-        logger.info(f"✅ LLMクエリ拡張完了: {expanded_query}")
+        if expanded_query and len(expanded_query) > len(query):
+            logger.info(f"✅ LLMクエリ拡張完了 (gemini-2.0-flash-001): {expanded_query}")
+            return expanded_query
         
-        return expanded_query
+        # エラー時は元のクエリを返す
+        logger.warning("⚠️ Gemini 2.0 Flashでクエリ拡張に失敗")
+        return query
         
     except Exception as e:
         logger.error(f"❌ LLMクエリ拡張エラー: {e}")
-        # エラー時は元のクエリを返す
         return query
 
 async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
     """
-    各研究者にLLM要約を追加
+    各研究者にLLM要約を追加（改良版）
     """
     try:
         logger.info(f"🤖 LLM要約生成開始: {len(results)}名の研究者")
         
-        model = TextGenerationModel.from_pretrained("gemini-1.0-pro")
+        # Gemini 2.0 Flash Liteで要約生成
+        model = TextGenerationModel.from_pretrained("gemini-2.0-flash-lite-001")
+        logger.info(f"✅ LLMモデル gemini-2.0-flash-lite-001 を使用")
         
         for result in results:
             try:
                 # プロフィール情報を整理
-                profile_text = f"""
-研究者名: {result.get('name_ja', 'N/A')}
-所属: {result.get('main_affiliation_name_ja', 'N/A')}
-研究キーワード: {result.get('research_keywords_ja', 'N/A')}
-研究分野: {result.get('research_fields_ja', 'N/A')}
-プロフィール: {result.get('profile_ja', 'N/A')[:200] if result.get('profile_ja') else 'N/A'}
-"""
+                name = result.get('name_ja', 'N/A')
+                affiliation = result.get('main_affiliation_name_ja', 'N/A')
+                keywords = result.get('research_keywords_ja', 'N/A')
+                fields = result.get('research_fields_ja', 'N/A')
                 
-                prompt = f"""
-以下の研究者情報を基に、検索キーワード「{query}」との関連性を中心とした要約を作成してください。
+                profile_text = f"""研究者: {name}
+所属: {affiliation}
+キーワード: {keywords}
+分野: {fields}"""
+                
+                prompt = f"""以下の研究者が「{query}」とどのように関連しているか、簡潔に説明してください（50文字以内）。
 
 {profile_text}
 
-要約（100文字程度）:
-"""
+関連性の説明:"""
                 
                 response = model.predict(
                     prompt,
-                    temperature=0.3,
-                    max_output_tokens=150
+                    temperature=0.2,
+                    max_output_tokens=80,
+                    top_p=0.8
                 )
                 
-                result["llm_summary"] = response.text.strip()
+                summary = response.text.strip()
+                if summary:
+                    result["llm_summary"] = summary
+                else:
+                    result["llm_summary"] = f"「{query}」に関連する研究を行っています。"
                 
             except Exception as e:
                 logger.warning(f"⚠️ 個別LLM要約エラー ({result.get('name_ja', 'N/A')}): {e}")
-                result["llm_summary"] = f"この研究者は「{query}」に関連する研究を行っています。"
+                result["llm_summary"] = f"「{query}」に関連する研究を行っています。"
         
         logger.info("✅ LLM要約生成完了")
         return results
