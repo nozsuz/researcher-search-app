@@ -6,3 +6,5 @@ vertexai>=1.38.0
 db-dtypes>=1.0.0
 pyarrow>=10.0.0
 numpy>=1.21.0
+fastapi>=0.104.0
+uvicorn>=0.24.0

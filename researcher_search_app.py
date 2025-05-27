@@ -11,7 +11,8 @@ import time
 st.set_page_config(
     page_title="🔬 研究者検索アプリ（デュアルモデル版）",
     page_icon="🔬",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed",  # iframe内での表示を最適化
 )
 
 # セッション状態の初期化
