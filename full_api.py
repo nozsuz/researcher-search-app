@@ -1,37 +1,3 @@
-@app.get("/test/env")
-async def test_environment_variables():
-    """環境変数の設定状況をテスト"""
-    env_status = {
-        "timestamp": time.time(),
-        "basic_config": {
-            "PROJECT_ID": os.getenv("PROJECT_ID", "Not Set"),
-            "LOCATION": os.getenv("LOCATION", "Not Set"),
-            "BIGQUERY_TABLE": os.getenv("BIGQUERY_TABLE", "Not Set"),
-            "ENABLE_GCP_INITIALIZATION": os.getenv("ENABLE_GCP_INITIALIZATION", "Not Set")
-        },
-        "gcp_credentials": {
-            "GCP_SERVICE_ACCOUNT_EMAIL": "Set" if os.getenv("GCP_SERVICE_ACCOUNT_EMAIL") else "Not Set",
-            "GCP_PRIVATE_KEY": "Set" if os.getenv("GCP_PRIVATE_KEY") else "Not Set",
-            "GCP_PRIVATE_KEY_ID": "Set" if os.getenv("GCP_PRIVATE_KEY_ID") else "Not Set",
-            "GCP_CLIENT_ID": "Set" if os.getenv("GCP_CLIENT_ID") else "Not Set",
-            "GCP_CLIENT_X509_CERT_URL": "Set" if os.getenv("GCP_CLIENT_X509_CERT_URL") else "Not Set"
-        },
-        "fallback_credentials": {
-            "GOOGLE_APPLICATION_CREDENTIALS_JSON": "Set" if os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON") else "Not Set",
-            "GOOGLE_APPLICATION_CREDENTIALS_BASE64": "Set" if os.getenv("GOOGLE_APPLICATION_CREDENTIALS_BASE64") else "Not Set"
-        },
-        "recommendations": []
-    }
-    
-    # 推奨事項を生成
-    if not os.getenv("GCP_SERVICE_ACCOUNT_EMAIL") and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON"):
-        env_status["recommendations"].append("認証情報が設定されていません")
-    
-    if os.getenv("ENABLE_GCP_INITIALIZATION", "false").lower() != "true":
-        env_status["recommendations"].append("ENABLE_GCP_INITIALIZATION=true を設定してGCP初期化を有効化してください")
-    
-    return env_status
-
 """
 研究者検索API - 完全版
 基本サーバーに検索機能を段階的に追加
@@ -184,7 +150,8 @@ async def health_check():
             "/health": "✅ 利用可能", 
             "/test": "✅ 利用可能",
             "/api/search": "✅ 実際検索可能" if clients["initialized"] else "🔄 準備中（モック応答あり）",
-            "/test/gcp": "✅ 利用可能"
+            "/test/gcp": "✅ 利用可能",
+            "/test/env": "✅ 利用可能"
         },
         "gcp_details": gcp_status
     }
@@ -203,6 +170,40 @@ async def test_endpoint():
         }
     }
 
+@app.get("/test/env")
+async def test_environment_variables():
+    """環境変数の設定状況をテスト"""
+    env_status = {
+        "timestamp": time.time(),
+        "basic_config": {
+            "PROJECT_ID": os.getenv("PROJECT_ID", "Not Set"),
+            "LOCATION": os.getenv("LOCATION", "Not Set"),
+            "BIGQUERY_TABLE": os.getenv("BIGQUERY_TABLE", "Not Set"),
+            "ENABLE_GCP_INITIALIZATION": os.getenv("ENABLE_GCP_INITIALIZATION", "Not Set")
+        },
+        "gcp_credentials": {
+            "GCP_SERVICE_ACCOUNT_EMAIL": "Set" if os.getenv("GCP_SERVICE_ACCOUNT_EMAIL") else "Not Set",
+            "GCP_PRIVATE_KEY": "Set" if os.getenv("GCP_PRIVATE_KEY") else "Not Set",
+            "GCP_PRIVATE_KEY_ID": "Set" if os.getenv("GCP_PRIVATE_KEY_ID") else "Not Set",
+            "GCP_CLIENT_ID": "Set" if os.getenv("GCP_CLIENT_ID") else "Not Set",
+            "GCP_CLIENT_X509_CERT_URL": "Set" if os.getenv("GCP_CLIENT_X509_CERT_URL") else "Not Set"
+        },
+        "fallback_credentials": {
+            "GOOGLE_APPLICATION_CREDENTIALS_JSON": "Set" if os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON") else "Not Set",
+            "GOOGLE_APPLICATION_CREDENTIALS_BASE64": "Set" if os.getenv("GOOGLE_APPLICATION_CREDENTIALS_BASE64") else "Not Set"
+        },
+        "recommendations": []
+    }
+    
+    # 推奨事項を生成
+    if not os.getenv("GCP_SERVICE_ACCOUNT_EMAIL") and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON"):
+        env_status["recommendations"].append("認証情報が設定されていません")
+    
+    if os.getenv("ENABLE_GCP_INITIALIZATION", "false").lower() != "true":
+        env_status["recommendations"].append("ENABLE_GCP_INITIALIZATION=true を設定してGCP初期化を有効化してください")
+    
+    return env_status
+
 @app.get("/test/gcp")
 async def test_gcp_connection():
     """シンプルGCP接続テスト"""
@@ -218,15 +219,21 @@ async def test_gcp_connection():
         from gcp_auth import get_bigquery_client
         bq_client = get_bigquery_client()
         
-        # シンプルクエリ実行
-        query = f"SELECT COUNT(*) as total FROM `{BIGQUERY_TABLE}` LIMIT 1"
-        query_job = bq_client.query(query)
-        results = list(query_job.result())
-        
-        test_results["tests"]["bigquery"] = {
-            "status": "✅ 成功",
-            "total_researchers": results[0].total if results else 0
-        }
+        if bq_client:
+            # シンプルクエリ実行
+            query = f"SELECT COUNT(*) as total FROM `{BIGQUERY_TABLE}` LIMIT 1"
+            query_job = bq_client.query(query)
+            results = list(query_job.result())
+            
+            test_results["tests"]["bigquery"] = {
+                "status": "✅ 成功",
+                "total_researchers": results[0].total if results else 0
+            }
+        else:
+            test_results["tests"]["bigquery"] = {
+                "status": "❌ 失敗",
+                "error": "BigQueryクライアントが初期化されていません"
+            }
         
     except Exception as e:
         test_results["tests"]["bigquery"] = {
@@ -236,12 +243,16 @@ async def test_gcp_connection():
     
     # Vertex AI接続テスト
     try:
-        from gcp_auth import initialize_vertex_ai
-        initialize_vertex_ai()
-        
-        test_results["tests"]["vertex_ai"] = {
-            "status": "✅ 初期化成功"
-        }
+        from gcp_auth import is_vertex_ai_ready
+        if is_vertex_ai_ready():
+            test_results["tests"]["vertex_ai"] = {
+                "status": "✅ 初期化成功"
+            }
+        else:
+            test_results["tests"]["vertex_ai"] = {
+                "status": "❌ 失敗",
+                "error": "Vertex AIが初期化されていません"
+            }
         
     except Exception as e:
         test_results["tests"]["vertex_ai"] = {
