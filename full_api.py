@@ -77,6 +77,7 @@ class SearchResponse(BaseModel):
     total: int
     execution_time: float
     executed_query_info: Optional[str] = None
+    expanded_info: Optional[dict] = None
 
 @app.on_event("startup")
 async def startup_event():
