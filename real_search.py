@@ -62,6 +62,7 @@ async def perform_real_search(request) -> Dict[str, Any]:
                     }
                     search_query = expanded_query
                     logger.info(f"🔄 LLMクエリ拡張結果: {search_query}")
+                    logger.info(f"🧠 拡張情報保存: {expanded_info}")
                 else:
                     logger.info("🔄 LLMクエリ拡張: 変更なし")
             except Exception as e:
@@ -93,6 +94,12 @@ async def perform_real_search(request) -> Dict[str, Any]:
         if request.use_llm_summary and vertex_ai_available:
             executed_query_info += ", AI要約: ON"
         executed_query_info += f", 実行時間: {execution_time:.2f}秒)"
+        
+        # 拡張情報のデバッグ出力
+        if expanded_info:
+            logger.info(f"🏷️ レスポンスに拡張情報を含めます: {expanded_info}")
+        else:
+            logger.info("🏷️ 拡張情報なし")
         
         return {
             "status": "success",
