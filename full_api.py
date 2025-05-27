@@ -1,3 +1,37 @@
+@app.get("/test/env")
+async def test_environment_variables():
+    """環境変数の設定状況をテスト"""
+    env_status = {
+        "timestamp": time.time(),
+        "basic_config": {
+            "PROJECT_ID": os.getenv("PROJECT_ID", "Not Set"),
+            "LOCATION": os.getenv("LOCATION", "Not Set"),
+            "BIGQUERY_TABLE": os.getenv("BIGQUERY_TABLE", "Not Set"),
+            "ENABLE_GCP_INITIALIZATION": os.getenv("ENABLE_GCP_INITIALIZATION", "Not Set")
+        },
+        "gcp_credentials": {
+            "GCP_SERVICE_ACCOUNT_EMAIL": "Set" if os.getenv("GCP_SERVICE_ACCOUNT_EMAIL") else "Not Set",
+            "GCP_PRIVATE_KEY": "Set" if os.getenv("GCP_PRIVATE_KEY") else "Not Set",
+            "GCP_PRIVATE_KEY_ID": "Set" if os.getenv("GCP_PRIVATE_KEY_ID") else "Not Set",
+            "GCP_CLIENT_ID": "Set" if os.getenv("GCP_CLIENT_ID") else "Not Set",
+            "GCP_CLIENT_X509_CERT_URL": "Set" if os.getenv("GCP_CLIENT_X509_CERT_URL") else "Not Set"
+        },
+        "fallback_credentials": {
+            "GOOGLE_APPLICATION_CREDENTIALS_JSON": "Set" if os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON") else "Not Set",
+            "GOOGLE_APPLICATION_CREDENTIALS_BASE64": "Set" if os.getenv("GOOGLE_APPLICATION_CREDENTIALS_BASE64") else "Not Set"
+        },
+        "recommendations": []
+    }
+    
+    # 推奨事項を生成
+    if not os.getenv("GCP_SERVICE_ACCOUNT_EMAIL") and not os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON"):
+        env_status["recommendations"].append("認証情報が設定されていません")
+    
+    if os.getenv("ENABLE_GCP_INITIALIZATION", "false").lower() != "true":
+        env_status["recommendations"].append("ENABLE_GCP_INITIALIZATION=true を設定してGCP初期化を有効化してください")
+    
+    return env_status
+
 """
 研究者検索API - 完全版
 基本サーバーに検索機能を段階的に追加
@@ -80,13 +114,29 @@ class SearchResponse(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
-    """アプリケーション開始時にクライアントを初期化"""
-    logger.info("🚀 アプリケーション開始 - クライアント初期化をスキップ")
+    """アプリケーション開始時にGCPクライアントを初期化"""
+    logger.info("🚀 アプリケーション開始 - GCP初期化を実行")
     logger.info(f"📊 Project ID: {PROJECT_ID}")
     logger.info(f"📍 Location: {LOCATION}")
     
-    # 初期化を段階的に行う（現在はスキップ）
-    clients["initialized"] = False  # 本格的な初期化は後で実装
+    # GCP初期化を実行
+    try:
+        from gcp_auth import initialize_gcp_on_startup, get_gcp_status
+        success = initialize_gcp_on_startup()
+        status = get_gcp_status()
+        
+        if success:
+            logger.info("✅ GCPクライアント初期化成功")
+            clients["initialized"] = True
+        else:
+            logger.warning("⚠️ GCPクライアント初期化失敗 - モックモードで継続")
+            clients["initialized"] = False
+            
+        logger.info(f"📊 GCPステータス: {status}")
+        
+    except Exception as e:
+        logger.error(f"❌ GCP初期化中にエラー: {e}")
+        clients["initialized"] = False
 
 @app.get("/")
 async def root():
@@ -106,6 +156,14 @@ async def root():
 @app.get("/health")
 async def health_check():
     """詳細なヘルスチェック"""
+    
+    # GCPステータスを取得
+    try:
+        from gcp_auth import get_gcp_status
+        gcp_status = get_gcp_status()
+    except Exception as e:
+        gcp_status = {"error": str(e)}
+    
     health_status = {
         "status": "healthy",
         "timestamp": time.time(),
@@ -116,17 +174,19 @@ async def health_check():
         },
         "clients_status": {
             "initialized": clients["initialized"],
-            "bigquery": "🔄 準備中",
-            "vertex_ai": "🔄 準備中",
-            "embedding_model": "🔄 準備中"
+            "bigquery": "✅ 準備完了" if gcp_status.get("bigquery_ready") else "🔄 準備中",
+            "vertex_ai": "✅ 準備完了" if gcp_status.get("vertex_ai_ready") else "🔄 準備中",
+            "embedding_model": "✅ 準備完了" if gcp_status.get("vertex_ai_ready") else "🔄 準備中",
+            "credentials": "✅ 設定済" if gcp_status.get("credentials_available") else "❌ 未設定"
         },
         "endpoints": {
             "/": "✅ 利用可能",
             "/health": "✅ 利用可能", 
             "/test": "✅ 利用可能",
-            "/api/search": "🔄 準備中（モック応答あり）",
+            "/api/search": "✅ 実際検索可能" if clients["initialized"] else "🔄 準備中（モック応答あり）",
             "/test/gcp": "✅ 利用可能"
-        }
+        },
+        "gcp_details": gcp_status
     }
     return health_status
 
