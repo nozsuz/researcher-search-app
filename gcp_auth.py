@@ -181,3 +181,9 @@ def get_bigquery_client():
 def is_vertex_ai_ready():
     """Vertex AIが利用可能かチェック"""
     return gcp_manager.is_vertex_ai_ready()
+
+def initialize_vertex_ai():
+    """明示的にVertex AIを初期化"""
+    if not gcp_manager.initialized:
+        gcp_manager.initialize_clients()
+    return gcp_manager.is_vertex_ai_ready()

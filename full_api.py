@@ -114,8 +114,8 @@ async def root():
         "version": "2.0.0",
         "features": {
             "basic_api": "✅ 利用可能",
-            "search_api": "🔄 準備中",
-            "gcp_integration": "🔄 準備中"
+            "search_api": "✅ 実際検索可能" if clients["initialized"] else "🔄 準備中",
+            "gcp_integration": "✅ 準備完了" if clients["initialized"] else "🔄 準備中"
         }
     }
 
@@ -151,7 +151,8 @@ async def health_check():
             "/test": "✅ 利用可能",
             "/api/search": "✅ 実際検索可能" if clients["initialized"] else "🔄 準備中（モック応答あり）",
             "/test/gcp": "✅ 利用可能",
-            "/test/env": "✅ 利用可能"
+            "/test/env": "✅ 利用可能",
+            "/test/real-search": "✅ 利用可能"
         },
         "gcp_details": gcp_status
     }
@@ -261,6 +262,42 @@ async def test_gcp_connection():
         }
     
     return test_results
+
+@app.get("/test/real-search")
+async def test_real_search():
+    """実際の検索機能をテスト"""
+    try:
+        from real_search import perform_real_search
+        
+        # テスト用の簡単なリクエスト
+        class TestRequest:
+            def __init__(self):
+                self.query = "人工知能"
+                self.method = "keyword"
+                self.max_results = 2
+                self.use_llm_expansion = False
+                self.use_llm_summary = False
+        
+        test_request = TestRequest()
+        result = await perform_real_search(test_request)
+        
+        return {
+            "test_status": "success",
+            "message": "実際の検索機能が動作しています",
+            "result_summary": {
+                "status": result.get("status"),
+                "total_results": result.get("total", 0),
+                "execution_time": result.get("execution_time", 0),
+                "method": result.get("method")
+            },
+            "sample_result": result.get("results", [])[:1] if result.get("results") else []
+        }
+    except Exception as e:
+        return {
+            "test_status": "error",
+            "message": f"実際の検索機能でエラー: {str(e)}",
+            "error_details": str(e)
+        }
 
 @app.post("/api/search", response_model=SearchResponse)
 async def search_researchers(request: SearchRequest):
