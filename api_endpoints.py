@@ -265,5 +265,19 @@ async def general_exception_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
+    import os
+    
+    # 環境変数からポートを取得（Railwayで自動設定される）
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    
+    print(f"🚀 Starting FastAPI server on port {port}")
+    print(f"📊 Project ID: {PROJECT_ID}")
+    print(f"📍 Location: {LOCATION}")
+    
+    uvicorn.run(
+        "api_endpoints:app",
+        host="0.0.0.0", 
+        port=port,
+        reload=False,  # 本番環境ではreloadを無効化
+        log_level="info"
+    )
