@@ -263,9 +263,61 @@ async def test_gcp_connection():
     
     return test_results
 
+@app.get("/test/llm")
+async def test_llm_functions():
+    """シンプルLLM機能テスト"""
+    test_results = {
+        "timestamp": time.time(),
+        "tests": {}
+    }
+    
+    # クエリ拡張テスト
+    try:
+        from real_search import expand_query_with_llm
+        test_query = "人工知能"
+        expanded = await expand_query_with_llm(test_query)
+        
+        test_results["tests"]["query_expansion"] = {
+            "status": "✅ 成功",
+            "original_query": test_query,
+            "expanded_query": expanded,
+            "expansion_worked": len(expanded) > len(test_query)
+        }
+        
+    except Exception as e:
+        test_results["tests"]["query_expansion"] = {
+            "status": "❌ 失敗",
+            "error": str(e)
+        }
+    
+    # 要約機能テスト
+    try:
+        from real_search import add_llm_summaries
+        test_results_data = [{
+            "name_ja": "テスト研究者",
+            "main_affiliation_name_ja": "テスト大学",
+            "research_keywords_ja": "人工知能, 機械学習",
+            "research_fields_ja": "情報学"
+        }]
+        
+        results_with_summary = await add_llm_summaries(test_results_data, "人工知能")
+        
+        test_results["tests"]["summary_generation"] = {
+            "status": "✅ 成功",
+            "summary_generated": "llm_summary" in results_with_summary[0],
+            "summary_text": results_with_summary[0].get("llm_summary", "N/A")
+        }
+        
+    except Exception as e:
+        test_results["tests"]["summary_generation"] = {
+            "status": "❌ 失敗",
+            "error": str(e)
+        }
+    
+    return test_results
+
 @app.get("/test/real-search")
 async def test_real_search():
-    """実際の検索機能をテスト"""
     try:
         from real_search import perform_real_search
         

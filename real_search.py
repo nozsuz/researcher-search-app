@@ -9,6 +9,7 @@ import time
 from typing import Dict, List, Optional, Any
 from google.cloud import bigquery
 from vertexai.language_models import TextGenerationModel, TextEmbeddingModel
+from vertexai.generative_models import GenerativeModel
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -333,35 +334,67 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
 
 async def expand_query_with_llm(query: str) -> str:
     """
-    LLMを使用してクエリを拡張（改良版）
+    LLMを使用してクエリを拡張（Gemini 2.0対応版）
     """
     try:
         logger.info(f"🤖 LLMクエリ拡張開始: {query}")
         
-        # Gemini 2.0 Flashでクエリ拡張
-        model = TextGenerationModel.from_pretrained("gemini-2.0-flash-001")
-        
-        prompt = f"""研究キーワード「{query}」に関連する学術用語を3-5個追加して、より効果的な検索クエリを作成してください。
+        # Gemini 2.0 Flash使用
+        try:
+            model = GenerativeModel("gemini-2.0-flash-001")
+            
+            prompt = f"""研究キーワード「{query}」に関連する学術用語を3-5個追加して、より効果的な検索クエリを作成してください。
 
 元のキーワード: {query}
 
 拡張されたクエリ (元のキーワード + 関連用語):"""
-        
-        response = model.predict(
-            prompt,
-            temperature=0.2,  # より安定した出力
-            max_output_tokens=100,
-            top_p=0.8,
-            top_k=40
-        )
-        
-        expanded_query = response.text.strip()
-        if expanded_query and len(expanded_query) > len(query):
-            logger.info(f"✅ LLMクエリ拡張完了 (gemini-2.0-flash-001): {expanded_query}")
-            return expanded_query
+            
+            response = model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.2,
+                    "max_output_tokens": 100,
+                    "top_p": 0.8,
+                    "top_k": 40
+                }
+            )
+            
+            expanded_query = response.text.strip()
+            if expanded_query and len(expanded_query) > len(query):
+                logger.info(f"✅ LLMクエリ拡張完了 (gemini-2.0-flash-001): {expanded_query}")
+                return expanded_query
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Gemini 2.0 Flash失敗: {e}")
+            
+            # フォールバックでtext-bisonを試行
+            try:
+                model = TextGenerationModel.from_pretrained("text-bison@002")
+                
+                prompt = f"""研究キーワード「{query}」に関連する学術用語を3-5個追加して、より効果的な検索クエリを作成してください。
+
+元のキーワード: {query}
+
+拡張されたクエリ (元のキーワード + 関連用語):"""
+                
+                response = model.predict(
+                    prompt,
+                    temperature=0.2,
+                    max_output_tokens=100,
+                    top_p=0.8,
+                    top_k=40
+                )
+                
+                expanded_query = response.text.strip()
+                if expanded_query and len(expanded_query) > len(query):
+                    logger.info(f"✅ LLMクエリ拡張完了 (text-bison@002): {expanded_query}")
+                    return expanded_query
+                    
+            except Exception as e2:
+                logger.warning(f"⚠️ Text-Bison フォールバック失敗: {e2}")
         
         # エラー時は元のクエリを返す
-        logger.warning("⚠️ Gemini 2.0 Flashでクエリ拡張に失敗")
+        logger.warning("⚠️ すべてのLLMモデルでクエリ拡張に失敗")
         return query
         
     except Exception as e:
@@ -370,14 +403,34 @@ async def expand_query_with_llm(query: str) -> str:
 
 async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
     """
-    各研究者にLLM要約を追加（改良版）
+    各研究者にLLM要約を追加（Gemini 2.0対応版）
     """
     try:
         logger.info(f"🤖 LLM要約生成開始: {len(results)}名の研究者")
         
-        # Gemini 2.0 Flash Liteで要約生成
-        model = TextGenerationModel.from_pretrained("gemini-2.0-flash-lite-001")
-        logger.info(f"✅ LLMモデル gemini-2.0-flash-lite-001 を使用")
+        # Gemini 2.0 Flash Lite使用
+        model = None
+        model_name = ""
+        
+        try:
+            model = GenerativeModel("gemini-2.0-flash-lite-001")
+            model_name = "gemini-2.0-flash-lite-001"
+            logger.info(f"✅ LLMモデル {model_name} を使用")
+        except Exception as e:
+            logger.warning(f"⚠️ Gemini 2.0 Flash Lite失敗: {e}")
+            
+            # フォールバックでtext-bisonを試行
+            try:
+                model = TextGenerationModel.from_pretrained("text-bison@002")
+                model_name = "text-bison@002"
+                logger.info(f"✅ LLMモデル {model_name} を使用")
+            except Exception as e2:
+                logger.error(f"❌ フォールバックモデル失敗: {e2}")
+                return results
+        
+        if not model:
+            logger.error("❌ 利用可能なLLMモデルがありません")
+            return results
         
         for result in results:
             try:
@@ -398,14 +451,29 @@ async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
 
 関連性の説明:"""
                 
-                response = model.predict(
-                    prompt,
-                    temperature=0.2,
-                    max_output_tokens=80,
-                    top_p=0.8
-                )
+                summary = ""
                 
-                summary = response.text.strip()
+                if "gemini" in model_name:
+                    # Geminiモデルの場合
+                    response = model.generate_content(
+                        prompt,
+                        generation_config={
+                            "temperature": 0.2,
+                            "max_output_tokens": 80,
+                            "top_p": 0.8
+                        }
+                    )
+                    summary = response.text.strip()
+                else:
+                    # text-bisonモデルの場合
+                    response = model.predict(
+                        prompt,
+                        temperature=0.2,
+                        max_output_tokens=80,
+                        top_p=0.8
+                    )
+                    summary = response.text.strip()
+                
                 if summary:
                     result["llm_summary"] = summary
                 else:
