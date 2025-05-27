@@ -155,8 +155,8 @@ async def test_gcp_connection():
     
     # BigQuery接続テスト
     try:
-        from google.cloud import bigquery
-        bq_client = bigquery.Client(project=PROJECT_ID)
+        from gcp_auth import get_bigquery_client
+        bq_client = get_bigquery_client()
         
         # シンプルクエリ実行
         query = f"SELECT COUNT(*) as total FROM `{BIGQUERY_TABLE}` LIMIT 1"
@@ -176,8 +176,8 @@ async def test_gcp_connection():
     
     # Vertex AI接続テスト
     try:
-        from google.cloud import aiplatform
-        aiplatform.init(project=PROJECT_ID, location=LOCATION)
+        from gcp_auth import initialize_vertex_ai
+        initialize_vertex_ai()
         
         test_results["tests"]["vertex_ai"] = {
             "status": "✅ 初期化成功"

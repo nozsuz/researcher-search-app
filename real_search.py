@@ -14,6 +14,7 @@ from vertexai.language_models import TextEmbeddingModel, TextGenerationModel
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import time
+from gcp_auth import get_bigquery_client, initialize_vertex_ai
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +40,12 @@ class RealSearchEngine:
         try:
             logger.info("🔧 GCPクライアント初期化開始...")
             
-            # BigQueryクライアント
-            self.bq_client = bigquery.Client(project=self.project_id)
+            # BigQueryクライアント（認証情報付き）
+            self.bq_client = get_bigquery_client()
             logger.info("✅ BigQueryクライアント初期化完了")
             
-            # Vertex AI初期化
-            aiplatform.init(project=self.project_id, location=self.location)
+            # Vertex AI初期化（認証情報付き）
+            initialize_vertex_ai()
             
             # エンベディングモデル
             self.embedding_model = TextEmbeddingModel.from_pretrained("textembedding-gecko@001")
