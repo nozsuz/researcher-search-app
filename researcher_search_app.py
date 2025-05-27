@@ -78,14 +78,25 @@ def initialize_clients():
                     st.write(f"終了文字: '{credentials_json[-10:]}'")
                     return None, None, None, None
                 
-                # 改行文字の処理
-                # \\n → \n の変換（Streamlit Secrets形式と同じ）
+                # 改行文字の処理（重要: JSONパース前に実行）
+                # Railway環境変数では \n が文字列として保存されているため、実際の改行に変換
                 if '\\n' in credentials_json:
-                    credentials_json = credentials_json.replace('\\n', '\n')
-                    st.info("🔧 改行文字を変換しました (\\\\n → \\n)")
+                    credentials_json = credentials_json.replace('\\n', '\\n')  # エスケープされた改行を維持
+                    st.info("🔧 改行文字のエスケープを維持しました")
+                elif '\n' in credentials_json and '\\n' not in credentials_json:
+                    # 既に実際の改行文字になっている場合、JSONとして無効なのでエスケープ
+                    credentials_json = credentials_json.replace('\n', '\\n')
+                    st.info("🔧 改行文字をエスケープしました")
                 
                 # JSONパース
                 credentials_dict = json.loads(credentials_json)
+                
+                # パース後に private_key の改行を実際の改行に戻す
+                if 'private_key' in credentials_dict:
+                    private_key = credentials_dict['private_key']
+                    if '\\n' in private_key:
+                        credentials_dict['private_key'] = private_key.replace('\\n', '\n')
+                        st.info("🔧 秘密鍵の改行文字を復元しました")
                 
                 # 必須フィールドの確認
                 required_fields = ['type', 'project_id', 'private_key', 'client_email']
@@ -98,6 +109,7 @@ def initialize_clients():
                 private_key = credentials_dict.get('private_key', '')
                 if '-----BEGIN PRIVATE KEY-----' not in private_key:
                     st.error("❌ private_keyの形式が不正です")
+                    st.write(f"秘密鍵の開始部分: {private_key[:50]}...")
                     return None, None, None, None
                 
                 # 認証情報の作成
@@ -114,36 +126,64 @@ def initialize_clients():
                 
             except json.JSONDecodeError as je:
                 st.error(f"❌ JSONパースエラー: {je}")
-                st.write("💡 JSONの形式を確認してください（改行、引用符、カンマなど）")
+                st.write("💡 改行文字の処理に問題があります。Railway環境変数を確認してください。")
                 # エラー箇所を表示
-                if hasattr(je, 'pos') and os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON'):
-                    error_context = credentials_json[max(0, je.pos-30):je.pos+30]
+                if hasattr(je, 'pos'):
+                    error_start = max(0, je.pos-50)
+                    error_end = min(len(credentials_json), je.pos+50)
+                    error_context = credentials_json[error_start:error_end]
                     st.code(f"エラー箇所付近: ...{error_context}...")
+                    st.write(f"エラー位置: {je.pos}文字目")
+                
+                # 代替方法を試行: 直接辞書として構築
+                st.warning("⚠️ 代替方法を試行します: 環境変数を分割して設定してください")
                 return None, None, None, None
             except Exception as e:
                 st.error(f"❌ 認証情報読み込みエラー: {e}")
                 return None, None, None, None
         
-        # 方法2: 秘密鍵を別の環境変数で設定
-        elif all([os.getenv("GCP_PROJECT_ID"), os.getenv("GCP_PRIVATE_KEY"), os.getenv("GCP_CLIENT_EMAIL")]):
+        # 方法2: 分割した環境変数から認証情報を構築（推奨）
+        elif os.getenv("GCP_PRIVATE_KEY"):
             try:
-                import base64
-                # Base64デコードした秘密鍵を使用
-                private_key = base64.b64decode(os.getenv("GCP_PRIVATE_KEY")).decode('utf-8')
+                # 秘密鍵の処理
+                private_key = os.getenv("GCP_PRIVATE_KEY")
                 
+                # 秘密鍵に改行を追加（PEM形式に必要）
+                if '\n' not in private_key:
+                    # ヘッダーとフッターを分離して改行を挿入
+                    if '-----BEGIN PRIVATE KEY-----' in private_key and '-----END PRIVATE KEY-----' in private_key:
+                        key_content = private_key.replace('-----BEGIN PRIVATE KEY-----', '').replace('-----END PRIVATE KEY-----', '')
+                        # 64文字ごとに改行を挿入
+                        formatted_lines = []
+                        for i in range(0, len(key_content), 64):
+                            formatted_lines.append(key_content[i:i+64])
+                        formatted_content = '\n'.join(formatted_lines)
+                        private_key = f"-----BEGIN PRIVATE KEY-----\n{formatted_content}\n-----END PRIVATE KEY-----\n"
+                        st.info("🔧 秘密鍵に適切な改行を追加しました")
+                
+                # 認証情報辞書を構築
                 credentials_dict = {
-                    "type": "service_account",
+                    "type": os.getenv("GCP_TYPE", "service_account"),
                     "project_id": os.getenv("GCP_PROJECT_ID"),
-                    "private_key_id": os.getenv("GCP_PRIVATE_KEY_ID", ""),
+                    "private_key_id": os.getenv("GCP_PRIVATE_KEY_ID"),
                     "private_key": private_key,
                     "client_email": os.getenv("GCP_CLIENT_EMAIL"),
-                    "client_id": os.getenv("GCP_CLIENT_ID", ""),
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                    "universe_domain": "googleapis.com"
+                    "client_id": os.getenv("GCP_CLIENT_ID"),
+                    "auth_uri": os.getenv("GCP_AUTH_URI", "https://accounts.google.com/o/oauth2/auth"),
+                    "token_uri": os.getenv("GCP_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+                    "auth_provider_x509_cert_url": os.getenv("GCP_AUTH_PROVIDER_X509_CERT_URL", "https://www.googleapis.com/oauth2/v1/certs"),
+                    "client_x509_cert_url": os.getenv("GCP_CLIENT_X509_CERT_URL"),
+                    "universe_domain": os.getenv("GCP_UNIVERSE_DOMAIN", "googleapis.com")
                 }
                 
+                # 必須フィールドの確認
+                required_fields = ['project_id', 'private_key', 'client_email']
+                missing_fields = [field for field in required_fields if not credentials_dict.get(field)]
+                if missing_fields:
+                    st.error(f"❌ 必須環境変数が不足: GCP_{field.upper()} for {missing_fields}")
+                    return None, None, None, None
+                
+                # 認証情報の作成
                 credentials = service_account.Credentials.from_service_account_info(
                     credentials_dict,
                     scopes=[
@@ -152,8 +192,12 @@ def initialize_clients():
                     ]
                 )
                 st.success("✅ 分割した環境変数から認証情報を読み込みました")
+                st.write(f"🏢 プロジェクトID: {credentials_dict.get('project_id')}")
+                st.write(f"📧 サービスアカウント: {credentials_dict.get('client_email')}")
+                
             except Exception as e:
-                st.error(f"分割環境変数からの認証情報読み込みエラー: {e}")
+                st.error(f"❌ 分割環境変数からの認証情報読み込みエラー: {e}")
+                return None, None, None, None
         
         # Vertex AI 初期化
         if credentials:
