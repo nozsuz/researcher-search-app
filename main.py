@@ -383,9 +383,20 @@ async def search_researchers(request: SearchRequest):
     if request.query:
         # モック用のキーワード拡張情報（キーワード検索かつLLM拡張有効時）
         if request.use_llm_expansion and request.method == "keyword":
+            # モックの拡張キーワードリスト
+            mock_expanded_keywords = [
+                request.query,
+                f"{request.query}研究",
+                f"{request.query}技術",
+                f"{request.query}イノベーション",
+                f"{request.query}開発",
+                "最新技術",
+                "先端研究"
+            ]
             expanded_info = {
                 "original_query": request.query,
-                "expanded_query": f"{request.query} 研究 技術 イノベーション"
+                "expanded_keywords": mock_expanded_keywords[:7],  # 最大7個
+                "expanded_query": " ".join(mock_expanded_keywords[:5])  # 検索用には5個
             }
             logger.info(f"🧠 モック拡張情報設定: {expanded_info}")
         
