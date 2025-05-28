@@ -124,10 +124,10 @@ async def perform_real_search(request) -> Dict[str, Any]:
 
 async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str, max_results: int) -> List[Dict]:
     """
-    実際のセマンティック検索（ベクトル埋め込みベース）
+    実際のセマンティック検索（VECTOR_SEARCH関数を使用）
     """
     try:
-        logger.info(f"🔍 セマンティック検索（埋め込みベース）実行: {query}")
+        logger.info(f"🔍 セマンティック検索（VECTOR_SEARCH）実行: {query}")
         
         # 1. クエリのベクトル化
         embedding_model = TextEmbeddingModel.from_pretrained("text-multilingual-embedding-002")
@@ -136,7 +136,104 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         
         logger.info(f"📊 クエリベクトル次元: {len(query_embedding)}")
         
-        # 2. データベースから研究者データを取得（テキスト形式）
+        # 次元数を768に調整（テーブルのエンベディング次元数に合わせる）
+        expected_dimensions = 768
+        if len(query_embedding) != expected_dimensions:
+            logger.info(f"次元数調整: {len(query_embedding)} → {expected_dimensions}")
+            if len(query_embedding) > expected_dimensions:
+                query_embedding = query_embedding[:expected_dimensions]
+            else:
+                query_embedding = query_embedding + [0.0] * (expected_dimensions - len(query_embedding))
+        
+        # クエリベクトルを文字列形式に変換
+        query_embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+        
+        # 2. VECTOR_SEARCH関数を使用してセマンティック検索
+        sql_query_semantic = f"""
+        SELECT
+          *
+        FROM
+          VECTOR_SEARCH(
+            (SELECT * FROM `apt-rope-217206.researcher_data.rd_250524`
+             WHERE ARRAY_LENGTH(embedding) > 0),
+            'embedding',
+            (SELECT {query_embedding_str} AS query_vector),
+            top_k => @top_k_param,
+            distance_type => 'COSINE'
+          )
+        ORDER BY distance ASC
+        """
+        
+        try:
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("top_k_param", "INT64", max_results),
+                ]
+            )
+            logger.info(f"BigQueryでセマンティック検索を実行中... (次元: {len(query_embedding)})")
+            
+            df = bq_client.query(sql_query_semantic, job_config=job_config).to_dataframe()
+            
+            if len(df) > 0:
+                logger.info(f"✅ 検索成功: {len(df)}件")
+                logger.info(f"原始DataFrame shape: {df.shape}")
+                logger.info(f"原始Columns: {list(df.columns)}")
+                
+                # ネスト構造を展開
+                results = []
+                
+                for idx, row in df.iterrows():
+                    result = {}
+                    
+                    # distance は直接コピー
+                    result['distance'] = row.get('distance')
+                    
+                    # base カラムから実際のデータを抽出
+                    base_data = row.get('base', {})
+                    if isinstance(base_data, dict):
+                        # base内のすべてのキーをトップレベルにコピー
+                        for key, value in base_data.items():
+                            result[key] = value
+                    else:
+                        # baseがネストされていない場合は、直接カラムから取得
+                        for col in df.columns:
+                            if col != 'distance':
+                                result[col] = row[col]
+                    
+                    results.append(result)
+                
+                logger.info(f"✅ セマンティック検索完了: {len(results)}件")
+                if results:
+                    logger.info(f"📊 最小距離: {results[0]['distance']:.4f}")
+                
+                return results
+            else:
+                logger.info("検索結果が空です。")
+                return []
+                
+        except Exception as e:
+            logger.error(f"BigQueryセマンティック検索中にエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # VECTOR_SEARCH関数が使えない場合は、リアルタイムベクトル化にフォールバック
+            logger.info("🔄 リアルタイムベクトル化検索にフォールバック")
+            return await semantic_search_realtime_fallback(bq_client, query, query_embedding, max_results)
+        
+    except Exception as e:
+        logger.error(f"❌ セマンティック検索エラー: {e}")
+        # エラー時はキーワード検索にフォールバック
+        logger.info("🔄 キーワード検索にフォールバック")
+        return await keyword_search(bq_client, query, max_results)
+
+async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: str, query_embedding: List[float], max_results: int) -> List[Dict]:
+    """
+    リアルタイムベクトル化によるセマンティック検索（フォールバック）
+    """
+    try:
+        logger.info(f"🔍 リアルタイムベクトル化セマンティック検索実行")
+        
+        # データベースから研究者データを取得（テキスト形式）
         first_keyword = query.split()[0] if query.split() else query
         search_sql = f"""
         SELECT 
@@ -199,7 +296,8 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         
         logger.info(f"📊 セマンティック検索候補: {len(candidates)}名")
         
-        # 3. 候補者のテキストをベクトル化（バッチ処理）
+        # 候補者のテキストをベクトル化（バッチ処理）
+        embedding_model = TextEmbeddingModel.from_pretrained("text-multilingual-embedding-002")
         candidate_texts = [candidate["text"] for candidate in candidates if candidate["text"]]
         
         if not candidate_texts:
@@ -220,7 +318,7 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                 # エラー時は空のベクトルを追加
                 candidate_embeddings.extend([[0.0] * len(query_embedding)] * len(batch_texts))
         
-        # 4. コサイン類似度を計算
+        # コサイン類似度を計算
         results_with_similarity = []
         
         for i, candidate in enumerate(candidates[:len(candidate_embeddings)]):
@@ -238,23 +336,21 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
             
             results_with_similarity.append(result)
         
-        # 5. 類似度でソート（類似度が高い順）
-        results_with_similarity.sort(key=lambda x: x["similarity"], reverse=True)
+        # 類似度でソート（距離が小さい順 = 類似度が高い順）
+        results_with_similarity.sort(key=lambda x: x["distance"])
         
         # 上位結果を返す
         final_results = results_with_similarity[:max_results]
         
-        logger.info(f"✅ セマンティック検索完了: {len(final_results)}件")
+        logger.info(f"✅ リアルタイムセマンティック検索完了: {len(final_results)}件")
         if final_results:
-            logger.info(f"📊 最高類似度: {final_results[0]['similarity']:.4f}")
+            logger.info(f"📊 最小距離: {final_results[0]['distance']:.4f}")
         
         return final_results
         
     except Exception as e:
-        logger.error(f"❌ セマンティック検索エラー: {e}")
-        # エラー時はキーワード検索にフォールバック
-        logger.info("🔄 キーワード検索にフォールバック")
-        return await keyword_search(bq_client, query, max_results)
+        logger.error(f"❌ リアルタイムセマンティック検索エラー: {e}")
+        raise
 
 def calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
     """
