@@ -54,15 +54,17 @@ async def perform_real_search(request) -> Dict[str, Any]:
         
         if request.use_llm_expansion and vertex_ai_available:
             try:
-                expanded_query = await expand_query_with_llm(search_query)
-                if expanded_query and expanded_query != search_query:
+                expansion_result = await expand_query_with_llm(search_query)
+                if expansion_result:
                     expanded_info = {
-                        "original_query": search_query,
-                        "expanded_query": expanded_query
+                        "original_query": expansion_result["original_query"],
+                        "expanded_keywords": expansion_result["expanded_keywords"],
+                        "expanded_query": expansion_result["expanded_query"]
                     }
-                    search_query = expanded_query
+                    # 検索用には拡張されたクエリを使用
+                    search_query = expansion_result["expanded_query"]
                     logger.info(f"🔄 LLMクエリ拡張結果: {search_query}")
-                    logger.info(f"🧠 拡張情報保存: {expanded_info}")
+                    logger.info(f"🧠 拡張キーワード: {expansion_result['expanded_keywords']}")
                 else:
                     logger.info("🔄 LLMクエリ拡張: 変更なし")
             except Exception as e:
@@ -278,25 +280,47 @@ def calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
 
 async def keyword_search(bq_client: bigquery.Client, query: str, max_results: int) -> List[Dict]:
     """
-    キーワード検索（従来の全文検索）
+    キーワード検索（全文検索、拡張キーワード対応）
     """
     try:
         logger.info(f"🔍 キーワード検索実行: {query}")
         
         # キーワードを分割
         keywords = [kw.strip() for kw in query.split() if kw.strip()]
+        logger.info(f"📝 検索キーワード: {keywords}")
         
         # LIKE条件を構築
         like_conditions = []
         for keyword in keywords:
+            # SQLインジェクション対策
+            safe_keyword = keyword.replace("'", "''")
             like_conditions.extend([
-                f"LOWER(research_keywords_ja) LIKE LOWER('%{keyword}%')",
-                f"LOWER(research_fields_ja) LIKE LOWER('%{keyword}%')",
-                f"LOWER(profile_ja) LIKE LOWER('%{keyword}%')",
-                f"LOWER(name_ja) LIKE LOWER('%{keyword}%')"
+                f"LOWER(research_keywords_ja) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(research_fields_ja) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(profile_ja) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(name_ja) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(paper_title_ja_first) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(project_title_ja_first) LIKE LOWER('%{safe_keyword}%')"
             ])
         
         where_clause = " OR ".join(like_conditions)
+        
+        # 関連度スコアをキーワードごとに計算
+        relevance_scores = []
+        for keyword in keywords:
+            safe_keyword = keyword.replace("'", "''")
+            relevance_scores.append(f"""
+                (
+                    CASE WHEN LOWER(name_ja) LIKE LOWER('%{safe_keyword}%') THEN 10 ELSE 0 END +
+                    CASE WHEN LOWER(research_keywords_ja) LIKE LOWER('%{safe_keyword}%') THEN 8 ELSE 0 END +
+                    CASE WHEN LOWER(research_fields_ja) LIKE LOWER('%{safe_keyword}%') THEN 6 ELSE 0 END +
+                    CASE WHEN LOWER(paper_title_ja_first) LIKE LOWER('%{safe_keyword}%') THEN 5 ELSE 0 END +
+                    CASE WHEN LOWER(project_title_ja_first) LIKE LOWER('%{safe_keyword}%') THEN 5 ELSE 0 END +
+                    CASE WHEN LOWER(profile_ja) LIKE LOWER('%{safe_keyword}%') THEN 4 ELSE 0 END
+                )
+            """)
+        
+        total_relevance_score = " + ".join(relevance_scores) if relevance_scores else "0"
         
         search_sql = f"""
         SELECT 
@@ -310,10 +334,8 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
             paper_title_ja_first,
             project_title_ja_first,
             researchmap_url,
-            -- 関連度スコア（マッチした条件の数）
-            (
-                {' + '.join([f"CASE WHEN {condition} THEN 1 ELSE 0 END" for condition in like_conditions])}
-            ) as relevance_score
+            -- 関連度スコア（重み付けされたマッチの合計）
+            ({total_relevance_score}) as relevance_score
         FROM `apt-rope-217206.researcher_data.rd_250524`
         WHERE {where_clause}
         ORDER BY relevance_score DESC, name_ja
@@ -346,9 +368,9 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
         logger.error(f"❌ キーワード検索エラー: {e}")
         raise
 
-async def expand_query_with_llm(query: str) -> str:
+async def expand_query_with_llm(query: str) -> Dict[str, Any]:
     """
-    LLMを使用してクエリを拡張（Gemini 2.0対応版）
+    LLMを使用してクエリを拡張し、拡張されたキーワードのリストを返す
     """
     try:
         logger.info(f"🤖 LLMクエリ拡張開始: {query}")
@@ -357,26 +379,45 @@ async def expand_query_with_llm(query: str) -> str:
         try:
             model = GenerativeModel("gemini-2.0-flash-001")
             
-            prompt = f"""研究キーワード「{query}」に関連する学術用語を3-5個追加して、より効果的な検索クエリを作成してください。
+            prompt = f"""あなたは学術研究データベースの検索アシスタントです。
+ユーザーが入力した「元のキーワード」について、そのキーワードを含む研究情報をより効果的に見つけるために、
+関連性の高い類義語、上位/下位概念語、英語の対応語（もしあれば）、具体的な技術名や物質名などを考慮し、
+検索に有効そうなキーワードを最大10個提案してください。
+提案は日本語の単語または短いフレーズで、カンマ区切りで出力してください。元のキーワード自体も提案に含めてください。
 
-元のキーワード: {query}
+元のキーワード: 「{query}」
 
-拡張されたクエリ (元のキーワード + 関連用語):"""
+提案:"""
             
             response = model.generate_content(
                 prompt,
                 generation_config={
                     "temperature": 0.2,
-                    "max_output_tokens": 100,
+                    "max_output_tokens": 200,
                     "top_p": 0.8,
                     "top_k": 40
                 }
             )
             
-            expanded_query = response.text.strip()
-            if expanded_query and len(expanded_query) > len(query):
-                logger.info(f"✅ LLMクエリ拡張完了 (gemini-2.0-flash-001): {expanded_query}")
-                return expanded_query
+            expanded_text = response.text.strip()
+            if expanded_text:
+                # カンマ区切りでキーワードを分割
+                expanded_keywords = [kw.strip() for kw in expanded_text.split(',') if kw.strip()]
+                
+                # 重複を削除しつつ順序を保持
+                final_keywords = []
+                if query not in expanded_keywords:
+                    final_keywords.append(query)
+                for kw in expanded_keywords:
+                    if kw not in final_keywords:
+                        final_keywords.append(kw)
+                
+                logger.info(f"✅ LLMクエリ拡張完了 (gemini-2.0-flash-001): {final_keywords}")
+                return {
+                    "original_query": query,
+                    "expanded_keywords": final_keywords,
+                    "expanded_query": ' '.join(final_keywords[:5])  # 検索用には最初の5個を使用
+                }
             
         except Exception as e:
             logger.warning(f"⚠️ Gemini 2.0 Flash失敗: {e}")
@@ -385,51 +426,67 @@ async def expand_query_with_llm(query: str) -> str:
             try:
                 model = TextGenerationModel.from_pretrained("text-bison@002")
                 
-                prompt = f"""研究キーワード「{query}」に関連する学術用語を3-5個追加して、より効果的な検索クエリを作成してください。
+                prompt = f"""研究キーワード「{query}」に関連する学術用語を5-10個提案してください。カンマ区切りで出力してください。
 
 元のキーワード: {query}
 
-拡張されたクエリ (元のキーワード + 関連用語):"""
+関連キーワード:"""
                 
                 response = model.predict(
                     prompt,
                     temperature=0.2,
-                    max_output_tokens=100,
+                    max_output_tokens=200,
                     top_p=0.8,
                     top_k=40
                 )
                 
-                expanded_query = response.text.strip()
-                if expanded_query and len(expanded_query) > len(query):
-                    logger.info(f"✅ LLMクエリ拡張完了 (text-bison@002): {expanded_query}")
-                    return expanded_query
+                expanded_text = response.text.strip()
+                if expanded_text:
+                    expanded_keywords = [kw.strip() for kw in expanded_text.split(',') if kw.strip()]
+                    final_keywords = [query] if query not in expanded_keywords else []
+                    final_keywords.extend([kw for kw in expanded_keywords if kw not in final_keywords])
+                    
+                    logger.info(f"✅ LLMクエリ拡張完了 (text-bison@002): {final_keywords}")
+                    return {
+                        "original_query": query,
+                        "expanded_keywords": final_keywords,
+                        "expanded_query": ' '.join(final_keywords[:5])
+                    }
                     
             except Exception as e2:
                 logger.warning(f"⚠️ Text-Bison フォールバック失敗: {e2}")
         
-        # エラー時は元のクエリを返す
+        # エラー時は元のクエリのみを返す
         logger.warning("⚠️ すべてのLLMモデルでクエリ拡張に失敗")
-        return query
+        return {
+            "original_query": query,
+            "expanded_keywords": [query],
+            "expanded_query": query
+        }
         
     except Exception as e:
         logger.error(f"❌ LLMクエリ拡張エラー: {e}")
-        return query
+        return {
+            "original_query": query,
+            "expanded_keywords": [query],
+            "expanded_query": query
+        }
 
 async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
     """
-    各研究者にLLM要約を追加（Gemini 2.0対応版）
+    各研究者にLLM要約を追加（Gemini 2.0対応版、レート制限対策版）
     """
     try:
         logger.info(f"🤖 LLM要約生成開始: {len(results)}名の研究者")
         
-        # Gemini 2.0 Flash Lite使用
+        # Gemini 2.0 Flash Lite使用（軽量モデル）
         model = None
         model_name = ""
         
         try:
             model = GenerativeModel("gemini-2.0-flash-lite-001")
             model_name = "gemini-2.0-flash-lite-001"
-            logger.info(f"✅ LLMモデル {model_name} を使用")
+            logger.info(f"✅ 軽量LLMモデル {model_name} を使用")
         except Exception as e:
             logger.warning(f"⚠️ Gemini 2.0 Flash Lite失敗: {e}")
             
@@ -446,24 +503,24 @@ async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
             logger.error("❌ 利用可能なLLMモデルがありません")
             return results
         
-        for result in results:
+        for idx, result in enumerate(results):
             try:
-                # プロフィール情報を整理
-                name = result.get('name_ja', 'N/A')
-                affiliation = result.get('main_affiliation_name_ja', 'N/A')
-                keywords = result.get('research_keywords_ja', 'N/A')
-                fields = result.get('research_fields_ja', 'N/A')
+                # レート制限対策: 少し待機
+                if idx > 0:
+                    time.sleep(0.5)
                 
-                profile_text = f"""研究者: {name}
-所属: {affiliation}
-キーワード: {keywords}
-分野: {fields}"""
+                # シンプルなプロンプトでトークン数を削減
+                name = result.get('name_ja', '')
+                affiliation = result.get('main_affiliation_name_ja', '')
+                keywords = result.get('research_keywords_ja', '')
+                profile = str(result.get('profile_ja', ''))[:200]  # 短縮
                 
-                prompt = f"""以下の研究者が「{query}」とどのように関連しているか、簡潔に説明してください（50文字以内）。
+                prompt = f"""検索クエリ: 「{query}」
+研究者: {name} ({affiliation})
+研究キーワード: {keywords}
+プロフィール概要: {profile}
 
-{profile_text}
-
-関連性の説明:"""
+この研究者と検索クエリとの関連性を200字以内で簡潔に説明してください:"""
                 
                 summary = ""
                 
@@ -472,8 +529,8 @@ async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
                     response = model.generate_content(
                         prompt,
                         generation_config={
-                            "temperature": 0.2,
-                            "max_output_tokens": 80,
+                            "temperature": 0.1,
+                            "max_output_tokens": 200,  # 短く制限
                             "top_p": 0.8
                         }
                     )
@@ -482,8 +539,8 @@ async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
                     # text-bisonモデルの場合
                     response = model.predict(
                         prompt,
-                        temperature=0.2,
-                        max_output_tokens=80,
+                        temperature=0.1,
+                        max_output_tokens=200,
                         top_p=0.8
                     )
                     summary = response.text.strip()
@@ -494,8 +551,13 @@ async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
                     result["llm_summary"] = f"「{query}」に関連する研究を行っています。"
                 
             except Exception as e:
-                logger.warning(f"⚠️ 個別LLM要約エラー ({result.get('name_ja', 'N/A')}): {e}")
-                result["llm_summary"] = f"「{query}」に関連する研究を行っています。"
+                error_msg = str(e)
+                if "429" in error_msg or "Resource exhausted" in error_msg:
+                    logger.warning(f"⚠️ API制限のため要約をスキップ ({result.get('name_ja', 'N/A')}): {e}")
+                    result["llm_summary"] = "⚠️ API制限のため要約をスキップしました"
+                else:
+                    logger.warning(f"⚠️ 個別LLM要約エラー ({result.get('name_ja', 'N/A')}): {e}")
+                    result["llm_summary"] = f"「{query}」に関連する研究を行っています。"
         
         logger.info("✅ LLM要約生成完了")
         return results
