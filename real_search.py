@@ -125,12 +125,15 @@ async def perform_real_search(request) -> Dict[str, Any]:
                 # エラー時は従来方式にフォールバック
                 use_internal_evaluation = False
         
-        # 従来方式の処理
+        # 従来方式の処理（AI関連性分析がOFFの場合）
         if not use_internal_evaluation:
-            # LLM要約の生成（従来方式）
+            # セマンティック検索でもキーワード検索でも、
+            # use_llm_summaryがfalseの場合はLLM要約を生成しない
             if request.use_llm_summary and results and vertex_ai_available:
+                # ここでLLM要約を生成するが、
+                # 両方とも同じフォーマットの要約を生成
                 try:
-                    results = await add_llm_summaries(results, request.query)  # 元のクエリを使用
+                    results = await add_llm_summaries(results, request.query)
                     logger.info("🤖 LLM要約を追加完了")
                 except Exception as e:
                     logger.warning(f"⚠️ LLM要約生成失敗: {e}")
@@ -657,18 +660,28 @@ async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
                 if idx > 0:
                     time.sleep(0.5)
                 
-                # シンプルなプロンプトでトークン数を削減
+                # 研究者情報を収集（セマンティック/キーワード検索共通）
                 name = result.get('name_ja', '')
                 affiliation = result.get('main_affiliation_name_ja', '')
                 keywords = result.get('research_keywords_ja', '')
-                profile = str(result.get('profile_ja', ''))[:200]  # 短縮
+                fields = result.get('research_fields_ja', '')
+                profile = str(result.get('profile_ja', ''))[:300]  # 300文字まで
+                paper = result.get('paper_title_ja_first', '')
+                project = result.get('project_title_ja_first', '')
                 
-                prompt = f"""検索クエリ: 「{query}」
-研究者: {name} ({affiliation})
+                # 統一されたプロンプト（全情報を含む）
+                prompt = f"""研究者情報:
+名前: {name} ({affiliation})
 研究キーワード: {keywords}
-プロフィール概要: {profile}
+研究分野: {fields}
+プロフィール: {profile}
+主要論文: {paper}
+主要プロジェクト: {project}
 
-この研究者と検索クエリとの関連性を200字以内で簡潔に説明してください:"""
+検索クエリ: 「{query}」
+
+上記の研究キーワード、プロフィール、主要論文、主要プロジェクトを踏まえて、
+この研究者と検索クエリとの関連性を200字程度で分析してください。"""
                 
                 summary = ""
                 
