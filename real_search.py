@@ -25,10 +25,14 @@ async def perform_real_search(request) -> Dict[str, Any]:
     
     try:
         logger.info(f"🔍 実際の検索開始: {request.query}, method: {request.method}")
+        logger.info(f"📊 全パラメータ: query={request.query}, method={request.method}, max_results={request.max_results}, use_llm_expansion={request.use_llm_expansion}, use_llm_summary={request.use_llm_summary}, use_internal_evaluation={getattr(request, 'use_internal_evaluation', 'NONE')}")
         
         # 内部評価モードの設定を確認
         use_internal_evaluation = getattr(request, 'use_internal_evaluation', False)
         logger.info(f"📊 評価モード: {'内部評価' if use_internal_evaluation else '従来方式'}")
+        logger.info(f"🔍 リクエストオブジェクト: {request}")
+        logger.info(f"🔍 use_internal_evaluation値: {use_internal_evaluation}")
+        logger.info(f"🔍 リクエスト属性: {dir(request)}")
         
         # GCPクライアントを取得
         from gcp_auth import get_bigquery_client, is_vertex_ai_ready
@@ -119,6 +123,8 @@ async def perform_real_search(request) -> Dict[str, Any]:
                 
             except Exception as e:
                 logger.error(f"❌ 内部評価モードでエラー: {e}")
+                import traceback
+                logger.error(f"スタックトレース: {traceback.format_exc()}")
                 # エラー時は従来方式にフォールバック
                 use_internal_evaluation = False
         
