@@ -371,6 +371,10 @@ class UniversalResearchEvaluator:
                 "summary": evaluation.summary,
                 "strengths": evaluation.strengths[:3],
                 "keywords": evaluation.researcher_data.get('research_keywords_ja', ''),
+                "fields": evaluation.researcher_data.get('research_fields_ja', ''),
+                "profile": evaluation.researcher_data.get('profile_ja', ''),
+                "paper_title": evaluation.researcher_data.get('paper_title_ja_first', ''),
+                "project_title": evaluation.researcher_data.get('project_title_ja_first', ''),
                 "url": evaluation.researcher_data.get('researchmap_url', '')
             }
             
