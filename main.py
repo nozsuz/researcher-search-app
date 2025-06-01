@@ -10,7 +10,7 @@ from pydantic import BaseModel
 import pandas as pd
 import os
 import time
-from typing import List, Optional
+from typing import List, Optional, Dict
 import logging
 
 # ロギング設定
@@ -53,6 +53,7 @@ class SearchRequest(BaseModel):
     max_results: int = 5
     use_llm_expansion: bool = False
     use_llm_summary: bool = False
+    use_internal_evaluation: bool = False  # 内部評価モードのフラグ
 
 class ResearcherResult(BaseModel):
     name_ja: Optional[str] = None
@@ -69,15 +70,31 @@ class ResearcherResult(BaseModel):
     distance: Optional[float] = None
     llm_summary: Optional[str] = None
 
+class EvaluatedResult(BaseModel):
+    """内部評価モードの結果"""
+    rank: int
+    name: str
+    affiliation: str
+    score: float
+    summary: str
+    strengths: List[str]
+    keywords: str
+    url: str
+    detail_scores: Optional[Dict[str, float]] = None
+
 class SearchResponse(BaseModel):
     status: str
     query: str
     method: str
-    results: List[ResearcherResult]
+    results: List[ResearcherResult] = []  # 従来モードの結果
     total: int
     execution_time: float
     executed_query_info: Optional[str] = None
     expanded_info: Optional[dict] = None
+    evaluation_mode: Optional[str] = None  # "internal" or "legacy"
+    summary: Optional[dict] = None  # 内部評価モード時のサマリー
+    displayed: Optional[int] = None  # 表示件数
+    evaluated_results: Optional[List[EvaluatedResult]] = None  # 内部評価モードの結果
 
 @app.on_event("startup")
 async def startup_event():
@@ -317,6 +334,49 @@ async def test_llm_functions():
     
     return test_results
 
+@app.get("/test/evaluation-mode")
+async def test_evaluation_mode():
+    """内部評価モードのテスト"""
+    try:
+        from real_search import perform_real_search
+        
+        # 内部評価モードでのテスト
+        class TestRequest:
+            def __init__(self):
+                self.query = "ナノメートルの微細加工技術"
+                self.method = "keyword"
+                self.max_results = 5
+                self.use_llm_expansion = False
+                self.use_llm_summary = False
+                self.use_internal_evaluation = True  # 内部評価モードON
+        
+        test_request = TestRequest()
+        result = await perform_real_search(test_request)
+        
+        if result.get("status") == "success" and result.get("evaluation_mode") == "internal":
+            return {
+                "test_status": "success",
+                "message": "内部評価モードが正常に動作しています",
+                "evaluation_mode": "internal",
+                "summary": result.get("summary"),
+                "total_evaluated": result.get("total", 0),
+                "displayed": result.get("displayed", 0),
+                "top_result": result.get("evaluated_results", [])[0] if result.get("evaluated_results") else None
+            }
+        else:
+            return {
+                "test_status": "fallback",
+                "message": "内部評価モードが利用できませんでした",
+                "evaluation_mode": result.get("evaluation_mode", "unknown"),
+                "error": result.get("error_message")
+            }
+    except Exception as e:
+        return {
+            "test_status": "error",
+            "message": f"内部評価モードテストでエラー: {str(e)}",
+            "error_details": str(e)
+        }
+
 @app.get("/test/real-search")
 async def test_real_search():
     try:
@@ -330,6 +390,7 @@ async def test_real_search():
                 self.max_results = 2
                 self.use_llm_expansion = False
                 self.use_llm_summary = False
+                self.use_internal_evaluation = False
         
         test_request = TestRequest()
         result = await perform_real_search(test_request)
@@ -363,12 +424,16 @@ async def search_researchers(request: SearchRequest):
     
     # 実際の検索を試行し、失敗した場合はモックにフォールバック
     try:
-        # 実際の検索を試行
+        # 実際の検索を試行（評価システム統合版）
         from real_search import perform_real_search
         result = await perform_real_search(request)
         
         if result["status"] == "success":
-            logger.info(f"✅ 実際の検索成功: {len(result['results'])}件")
+            # 評価モードに応じてログを調整
+            if result.get("evaluation_mode") == "internal":
+                logger.info(f"✅ 実際の検索成功（内部評価モード）: {result.get('total', 0)}件中{result.get('displayed', 0)}件表示")
+            else:
+                logger.info(f"✅ 実際の検索成功: {len(result.get('results', []))}件")
             return SearchResponse(**result)
         else:
             logger.warning(f"⚠️ 実際の検索失敗、モックにフォールバック: {result.get('error_message')}")
@@ -471,7 +536,8 @@ async def search_researchers_get(
     method: str = Query("semantic", description="検索方法 (semantic/keyword)"),
     max_results: int = Query(5, ge=1, le=20, description="最大結果数"),
     use_llm_expansion: bool = Query(False, description="LLMキーワード拡張"),
-    use_llm_summary: bool = Query(False, description="LLM要約生成")
+    use_llm_summary: bool = Query(False, description="LLM要約生成"),
+    use_internal_evaluation: bool = Query(False, description="内部評価モードを使用")
 ):
     """
     GET版の研究者検索エンドポイント（テスト用）
@@ -481,7 +547,8 @@ async def search_researchers_get(
         method=method,
         max_results=max_results,
         use_llm_expansion=use_llm_expansion,
-        use_llm_summary=use_llm_summary
+        use_llm_summary=use_llm_summary,
+        use_internal_evaluation=use_internal_evaluation
     )
     return await search_researchers(request)
 

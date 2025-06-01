@@ -1,7 +1,6 @@
 """
-実際の研究者検索機能（LLM修正版）
-BigQuery + Vertex AI を使用した本格的な検索システム
-LLM機能の安定性を向上
+実際の研究者検索機能（評価システム統合版）
+BigQuery + Vertex AI + 評価システムを使用した本格的な検索システム
 """
 
 import logging
@@ -11,17 +10,25 @@ from google.cloud import bigquery
 from vertexai.language_models import TextGenerationModel, TextEmbeddingModel
 from vertexai.generative_models import GenerativeModel
 import numpy as np
+from evaluation_system import UniversalResearchEvaluator
 
 logger = logging.getLogger(__name__)
 
+# 評価システムのインスタンスをグローバルに保持
+evaluator = UniversalResearchEvaluator()
+
 async def perform_real_search(request) -> Dict[str, Any]:
     """
-    実際の研究者検索を実行
+    実際の研究者検索を実行（評価システム統合版）
     """
     start_time = time.time()
     
     try:
         logger.info(f"🔍 実際の検索開始: {request.query}, method: {request.method}")
+        
+        # 内部評価モードの設定を確認
+        use_internal_evaluation = getattr(request, 'use_internal_evaluation', False)
+        logger.info(f"📊 評価モード: {'内部評価' if use_internal_evaluation else '従来方式'}")
         
         # GCPクライアントを取得
         from gcp_auth import get_bigquery_client, is_vertex_ai_ready
@@ -79,21 +86,61 @@ async def perform_real_search(request) -> Dict[str, Any]:
         
         logger.info(f"📊 検索結果: {len(results)}件")
         
-        # LLM要約の生成
-        if request.use_llm_summary and results and vertex_ai_available:
+        # 評価システムによる処理
+        if use_internal_evaluation and results:
             try:
-                results = await add_llm_summaries(results, request.query)  # 元のクエリを使用
-                logger.info("🤖 LLM要約を追加完了")
+                # 内部評価モードで研究者を評価
+                evaluations = await evaluator.evaluate_researchers(
+                    results, 
+                    request.query,  # 元のクエリを使用
+                    use_internal_evaluation=True
+                )
+                
+                # UI用にフォーマット
+                formatted_result = evaluator.format_for_ui(evaluations, request.max_results)
+                
+                execution_time = time.time() - start_time
+                
+                # 内部評価モードのレスポンス
+                return {
+                    "status": "success",
+                    "query": request.query,
+                    "method": request.method,
+                    "evaluation_mode": "internal",
+                    "summary": formatted_result["summary"],
+                    "results": [],  # 従来形式の結果は空
+                    "evaluated_results": formatted_result["results"],  # 評価済み結果
+                    "total": formatted_result["metadata"]["total_found"],
+                    "displayed": formatted_result["metadata"]["displayed"],
+                    "execution_time": execution_time,
+                    "executed_query_info": f"内部評価モード実行 (方法: {request.method}, 実行時間: {execution_time:.2f}秒)",
+                    "expanded_info": expanded_info
+                }
+                
             except Exception as e:
-                logger.warning(f"⚠️ LLM要約生成失敗: {e}")
+                logger.error(f"❌ 内部評価モードでエラー: {e}")
+                # エラー時は従来方式にフォールバック
+                use_internal_evaluation = False
+        
+        # 従来方式の処理
+        if not use_internal_evaluation:
+            # LLM要約の生成（従来方式）
+            if request.use_llm_summary and results and vertex_ai_available:
+                try:
+                    results = await add_llm_summaries(results, request.query)  # 元のクエリを使用
+                    logger.info("🤖 LLM要約を追加完了")
+                except Exception as e:
+                    logger.warning(f"⚠️ LLM要約生成失敗: {e}")
         
         execution_time = time.time() - start_time
         
         # 実行情報を生成
         executed_query_info = f"実際のGCP検索実行 (方法: {request.method}"
+        if use_internal_evaluation:
+            executed_query_info += ", 評価モード: 内部評価"
         if request.use_llm_expansion and vertex_ai_available and request.method != "semantic":
             executed_query_info += ", キーワード拡張: ON"
-        if request.use_llm_summary and vertex_ai_available:
+        if request.use_llm_summary and vertex_ai_available and not use_internal_evaluation:
             executed_query_info += ", AI要約: ON"
         executed_query_info += f", 実行時間: {execution_time:.2f}秒)"
         
@@ -107,6 +154,7 @@ async def perform_real_search(request) -> Dict[str, Any]:
             "status": "success",
             "query": request.query,
             "method": request.method,
+            "evaluation_mode": "legacy",
             "results": results,
             "total": len(results),
             "execution_time": execution_time,
@@ -122,6 +170,7 @@ async def perform_real_search(request) -> Dict[str, Any]:
             "execution_time": time.time() - start_time
         }
 
+# 以下、既存の関数はそのまま維持
 async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str, max_results: int) -> List[Dict]:
     """
     実際のセマンティック検索（VECTOR_SEARCH関数を使用）
