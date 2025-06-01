@@ -158,7 +158,9 @@ class UniversalResearchEvaluator:
 所属: {r.get('main_affiliation_name_ja', '')}
 研究キーワード: {r.get('research_keywords_ja', '')}
 研究分野: {r.get('research_fields_ja', '')}
-プロジェクト: {r.get('project_title_ja_first', '')}
+プロフィール: {str(r.get('profile_ja', ''))[:300] if r.get('profile_ja') else ''}
+主要論文: {r.get('paper_title_ja_first', '')}
+主要プロジェクト: {r.get('project_title_ja_first', '')}
 """
             researchers_info.append(info)
         
@@ -199,7 +201,7 @@ class UniversalResearchEvaluator:
         "interdisciplinary": "工学と医学の融合研究を推進",
         "recency": "2024年に最新の研究成果を発表"
       }},
-      "summary": "各スコアの理由を統合した150字以内の関連性分析",
+      "summary": "研究キーワード、プロフィール、主要論文、主要プロジェクトを踏まえて、検索クエリとの関連性を200字程度で要約",
       "strengths": ["強み1", "強み2", "強み3"]
     }}
   ]
