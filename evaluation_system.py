@@ -32,6 +32,7 @@ class ResearcherEvaluation:
     total_score: float
     summary: str
     strengths: List[str]
+    score_reasons: Optional[Dict[str, str]] = None
     
 class UniversalResearchEvaluator:
     """汎用的な研究者評価システム"""
@@ -165,7 +166,7 @@ class UniversalResearchEvaluator:
 
 {chr(10).join(researchers_info)}
 
-各研究者について、以下の7つの観点で1-10点で評価し、JSON形式で出力してください：
+各研究者について、以下の7つの観点で1-10点で評価し、各スコアの理由を含めてJSON形式で出力してください：
 
 1. keyword_match: クエリと研究キーワードの一致度
 2. research_directness: 研究内容とクエリの直接的関連性
@@ -189,7 +190,16 @@ class UniversalResearchEvaluator:
         "interdisciplinary": 6,
         "recency": 8
       }},
-      "summary": "この研究者の強みを50字以内で",
+      "score_reasons": {{
+        "keyword_match": "研究キーワードに『{query}』が直接含まれている",
+        "research_directness": "主要プロジェクトが{query}の実用化に焦点",
+        "expertise_depth": "該当分野で10年以上の研究実績",
+        "practical_evidence": "関連特許3件、実用化事例あり",
+        "research_quality": "トップジャーナルへの掲載実績",
+        "interdisciplinary": "工学と医学の融合研究を推進",
+        "recency": "2024年に最新の研究成果を発表"
+      }},
+      "summary": "各スコアの理由を統合した150字以内の関連性分析",
       "strengths": ["強み1", "強み2", "強み3"]
     }}
   ]
@@ -228,7 +238,8 @@ class UniversalResearchEvaluator:
                             scores=scores,
                             total_score=total_score,
                             summary=eval_data.get('summary', ''),
-                            strengths=eval_data.get('strengths', [])
+                            strengths=eval_data.get('strengths', []),
+                            score_reasons=eval_data.get('score_reasons', {})
                         )
                         evaluations.append(evaluation)
             
@@ -381,6 +392,10 @@ class UniversalResearchEvaluator:
             # 詳細スコア（内部評価モードの場合のみ）
             if evaluation.scores:
                 result["detail_scores"] = evaluation.scores
+                
+            # スコアの理由
+            if evaluation.score_reasons:
+                result["score_reasons"] = evaluation.score_reasons
             
             results.append(result)
         

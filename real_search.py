@@ -27,12 +27,9 @@ async def perform_real_search(request) -> Dict[str, Any]:
         logger.info(f"🔍 実際の検索開始: {request.query}, method: {request.method}")
         logger.info(f"📊 全パラメータ: query={request.query}, method={request.method}, max_results={request.max_results}, use_llm_expansion={request.use_llm_expansion}, use_llm_summary={request.use_llm_summary}, use_internal_evaluation={getattr(request, 'use_internal_evaluation', 'NONE')}")
         
-        # 内部評価モードの設定を確認
-        use_internal_evaluation = getattr(request, 'use_internal_evaluation', False)
-        logger.info(f"📊 評価モード: {'内部評価' if use_internal_evaluation else '従来方式'}")
-        logger.info(f"🔍 リクエストオブジェクト: {request}")
-        logger.info(f"🔍 use_internal_evaluation値: {use_internal_evaluation}")
-        logger.info(f"🔍 リクエスト属性: {dir(request)}")
+        # AI要約がONの場合、常に内部評価モードを使用
+        use_internal_evaluation = request.use_llm_summary or getattr(request, 'use_internal_evaluation', False)
+        logger.info(f"📊 評価モード: {'内部評価（AI関連性分析）' if use_internal_evaluation else '従来方式'}")
         
         # GCPクライアントを取得
         from gcp_auth import get_bigquery_client, is_vertex_ai_ready
@@ -90,7 +87,7 @@ async def perform_real_search(request) -> Dict[str, Any]:
         
         logger.info(f"📊 検索結果: {len(results)}件")
         
-        # 評価システムによる処理
+        # 評価システムによる処理（AI関連性分析を統合）
         if use_internal_evaluation and results:
             try:
                 # 内部評価モードで研究者を評価
@@ -117,12 +114,12 @@ async def perform_real_search(request) -> Dict[str, Any]:
                     "total": formatted_result["metadata"]["total_found"],
                     "displayed": formatted_result["metadata"]["displayed"],
                     "execution_time": execution_time,
-                    "executed_query_info": f"内部評価モード実行 (方法: {request.method}, 実行時間: {execution_time:.2f}秒)",
+                    "executed_query_info": f"AI関連性分析実行 (方法: {request.method}, 実行時間: {execution_time:.2f}秒)",
                     "expanded_info": expanded_info
                 }
                 
             except Exception as e:
-                logger.error(f"❌ 内部評価モードでエラー: {e}")
+                logger.error(f"❌ AI関連性分析でエラー: {e}")
                 import traceback
                 logger.error(f"スタックトレース: {traceback.format_exc()}")
                 # エラー時は従来方式にフォールバック
