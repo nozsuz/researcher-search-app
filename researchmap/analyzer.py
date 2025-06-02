@@ -238,6 +238,9 @@ class ResearchMapAnalyzer:
         # 最近の発表の抽出
         recent_presentations = self._extract_recent_presentations(presentations, limit=3)
         
+        # 主要特許の抽出
+        key_patents = self._extract_key_patents(industrial_properties, query, limit=3)
+        
         # LLMによる詳細分析
         if self.llm_model:
             detailed_analysis = await self._generate_detailed_analysis(
@@ -269,7 +272,8 @@ class ResearchMapAnalyzer:
             "detailed_analysis": detailed_analysis,
             "top_papers": relevant_papers,
             "key_projects": key_projects,
-            "recent_presentations": recent_presentations
+            "recent_presentations": recent_presentations,
+            "key_patents": key_patents
         }
     
     def _get_name(self, profile: Dict) -> str:
@@ -328,8 +332,15 @@ class ResearchMapAnalyzer:
         
         for paper in papers:
             # タイトルの取得（ResearchMapの実際の構造に合わせる）
-            title_ja = paper.get("paper_title", {}).get("ja", "")
-            title_en = paper.get("paper_title", {}).get("en", "")
+            # paper_title または published_paper_title の両方に対応
+            paper_title_data = paper.get("paper_title") or paper.get("published_paper_title", {})
+            
+            if isinstance(paper_title_data, dict):
+                title_ja = paper_title_data.get("ja", "")
+                title_en = paper_title_data.get("en", "")
+            else:
+                title_ja = ""
+                title_en = ""
             
             # 旧形式のフィールドも確認
             if not title_ja and "titles" in paper:
@@ -392,25 +403,35 @@ class ResearchMapAnalyzer:
         """主要プロジェクトを抽出"""
         key_projects = []
         
-        for project in projects[:limit]:  # 最新のものから
-            # タイトルの取得
-            project_title = project.get("project_title", {})
+        for i, project in enumerate(projects[:limit]):  # 最新のものから
+            # デバッグ: プロジェクト全体の構造を確認
+            logger.info(f"プロジェクト{i+1}のデータ構造: {json.dumps(project, ensure_ascii=False, indent=2)[:500]}...")
+            
+            # タイトルの取得 - ResearchMap APIの実際のフィールド名に対応
+            # research_project_title または project_title の両方に対応
+            project_title = project.get("research_project_title") or project.get("project_title", {})
+            logger.info(f"project_title取得結果: {project_title}, 型: {type(project_title)}")
             
             # project_titleが文字列の場合とオブジェクトの場合に対応
             if isinstance(project_title, str):
                 title = project_title
+                logger.info(f"文字列型のタイトル: {title}")
             elif isinstance(project_title, dict):
-                title = project_title.get("ja", "")
-                if not title:
-                    title = project_title.get("en", "")
+                title_ja = project_title.get("ja")
+                title_en = project_title.get("en")
+                logger.info(f"辞書型のタイトル - ja: {repr(title_ja)}, en: {repr(title_en)}")
+                
+                # 日本語タイトルを優先
+                if title_ja is not None and title_ja != "":
+                    title = title_ja
+                elif title_en is not None and title_en != "":
+                    title = title_en
+                else:
+                    title = "タイトル不明"
+                    logger.warning(f"タイトルが取得できません: {project_title}")
             else:
                 title = "タイトル不明"
-                logger.warning(f"予期しないproject_titleの型: {type(project_title)}")
-            
-            # タイトルが取得できなかった場合のデバッグ情報
-            if not title:
-                logger.info(f"プロジェクトタイトルが空: {project_title}")
-                title = "タイトル不明"
+                logger.warning(f"予期しないproject_titleの型: {type(project_title)}, 値: {project_title}")
             
             # 期間の取得
             from_date = project.get("from_date", "")
@@ -434,9 +455,12 @@ class ResearchMapAnalyzer:
             
             period = f"{start_year}-{end_year}"
             
-            # タイトルを文字列に変換（念のため）
+            # 最終的なタイトルの確認
+            final_title = str(title) if title else "タイトル不明"
+            logger.info(f"最終タイトル: {final_title}")
+            
             key_projects.append({
-                "title": str(title) if title else "タイトル不明",
+                "title": final_title,
                 "period": period
             })
         
@@ -469,6 +493,61 @@ class ResearchMapAnalyzer:
         
         # 重複を除去
         return list(dict.fromkeys(keywords))
+    
+
+    
+    def _extract_key_patents(self, industrial_properties: List[Dict], query: str, limit: int = 3) -> List[Dict]:
+        """主要特許を抽出"""
+        key_patents = []
+        
+        # 特許権のみをフィルタリング
+        patents = [ip for ip in industrial_properties if ip.get("industrial_property_right_type") == "patent_right"]
+        
+        for i, patent in enumerate(patents[:limit]):
+            # タイトルの取得
+            patent_title = patent.get("industrial_property_right_title", {})
+            
+            if isinstance(patent_title, str):
+                title = patent_title
+            elif isinstance(patent_title, dict):
+                title = patent_title.get("ja", "")
+                if not title:
+                    title = patent_title.get("en", "")
+            else:
+                title = "タイトル不明"
+            
+            # 出願番号・特許番号
+            application_number = patent.get("application_number", "")
+            patent_number = patent.get("patent_number", "")
+            
+            # 出願日
+            application_date = patent.get("application_date", "")
+            if isinstance(application_date, dict):
+                year = application_date.get("year", "")
+                month = application_date.get("month", "")
+                day = application_date.get("day", "")
+                application_date = f"{year}/{month}/{day}" if year else "不明"
+            
+            # 発明者
+            inventors = patent.get("inventors", [])
+            inventor_names = []
+            for inventor in inventors:
+                if isinstance(inventor, dict):
+                    name = inventor.get("name", {})
+                    if isinstance(name, dict):
+                        inventor_names.append(name.get("ja", name.get("en", "")))
+                    elif isinstance(name, str):
+                        inventor_names.append(name)
+            
+            key_patents.append({
+                "title": title,
+                "application_number": application_number,
+                "patent_number": patent_number,
+                "application_date": application_date,
+                "inventors": ", ".join(inventor_names) if inventor_names else "発明者不明"
+            })
+        
+        return key_patents
     
     def _extract_recent_presentations(self, presentations: List[Dict], limit: int = 3) -> List[Dict]:
         """最近の発表を抽出"""
@@ -538,9 +617,16 @@ class ResearchMapAnalyzer:
 主要論文（最新5件）:
 """
         for i, paper in enumerate(papers[:5]):
-            title = paper.get("paper_title", {}).get("ja", "")
-            if not title:
-                title = paper.get("paper_title", {}).get("en", "")
+            # paper_title または published_paper_title の両方に対応
+            paper_title_data = paper.get("paper_title") or paper.get("published_paper_title", {})
+            
+            if isinstance(paper_title_data, dict):
+                title = paper_title_data.get("ja", "")
+                if not title:
+                    title = paper_title_data.get("en", "")
+            else:
+                title = ""
+                
             if title:
                 prompt += f"{i+1}. {title}\n"
         
@@ -611,8 +697,16 @@ class ResearchMapAnalyzer:
         # 関連論文数
         relevant_count = 0
         for paper in papers:
-            title_ja = paper.get("paper_title", {}).get("ja", "")
-            title_en = paper.get("paper_title", {}).get("en", "")
+            # paper_title または published_paper_title の両方に対応
+            paper_title_data = paper.get("paper_title") or paper.get("published_paper_title", {})
+            
+            if isinstance(paper_title_data, dict):
+                title_ja = paper_title_data.get("ja", "")
+                title_en = paper_title_data.get("en", "")
+            else:
+                title_ja = ""
+                title_en = ""
+                
             if query_lower in title_ja.lower() or query_lower in title_en.lower():
                 relevant_count += 1
         
@@ -692,9 +786,19 @@ class ResearchMapAnalyzer:
         industry_projects = 0
         
         for project in projects:
-            title = project.get("project_title", {}).get("ja", "")
-            if not title:
-                title = project.get("project_title", {}).get("en", "")
+            # ResearchMap APIの実際のフィールド名に対応
+            project_title = project.get("research_project_title") or project.get("project_title", {})
+            
+            # project_titleが文字列の場合とオブジェクトの場合に対応
+            if isinstance(project_title, str):
+                title = project_title
+            elif isinstance(project_title, dict):
+                title = project_title.get("ja", "")
+                if not title:
+                    title = project_title.get("en", "")
+            else:
+                title = ""
+            
             title_text = title.lower()
             if any(keyword in title_text for keyword in industry_keywords):
                 industry_projects += 1

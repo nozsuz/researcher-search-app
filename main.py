@@ -639,6 +639,15 @@ async def analyze_researcher(request: ResearcherAnalysisRequest):
                     "title": f"NEDO {request.query}技術開発事業",
                     "period": "2020-2023"
                 }
+            ],
+            "key_patents": [
+                {
+                    "title": f"{request.query}関連技術の特許",
+                    "application_number": "特2023-123456",
+                    "patent_number": "特許第6789012号",
+                    "application_date": "2023/04/01",
+                    "inventors": "研究者他"
+                }
             ]
             }
             
