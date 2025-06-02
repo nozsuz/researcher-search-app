@@ -248,7 +248,8 @@ class ResearchMapAnalyzer:
                 research_interests, presentations, industrial_properties
             )
             scores = await self._calculate_scores(
-                profile, papers, projects, awards, query
+                profile, papers, projects, awards, query,
+                research_interests, research_areas
             )
         else:
             # LLMが使えない場合の簡易分析
@@ -684,14 +685,54 @@ class ResearchMapAnalyzer:
         papers: List[Dict],
         projects: List[Dict],
         awards: List[Dict],
-        query: str
+        query: str,
+        research_interests: List[Dict] = None,
+        research_areas: List[Dict] = None
     ) -> Dict[str, int]:
-        """スコアの計算"""
+        """ハイブリッドスコアの計算（ルールベース + LLM）"""
         
-        # 基本的なスコア計算
-        technical_relevance = min(40, self._calculate_technical_relevance(papers, query))
-        achievements = min(30, self._calculate_achievements(papers, projects, awards))
-        practical_applicability = min(30, self._calculate_practical_applicability(projects))
+        # 1. ルールベースのスコア計算（改良版）
+        rule_based_scores = self._calculate_rule_based_scores(
+            papers, projects, awards, query, research_interests, research_areas
+        )
+        
+        # 2. LLMが利用可能な場合はLLMベースのスコアも計算
+        if self.llm_model:
+            try:
+                llm_scores = await self._calculate_llm_based_scores(
+                    profile, papers, projects, awards, query, research_interests
+                )
+                
+                # 3. ハイブリッドスコアの計算（重み付け平均）
+                hybrid_scores = self._calculate_hybrid_scores(
+                    rule_based_scores, llm_scores, weight=0.6  # LLMの重みを60%に
+                )
+                
+                return hybrid_scores
+                
+            except Exception as e:
+                logger.warning(f"LLMスコア計算失敗、ルールベースのみ使用: {e}")
+                return rule_based_scores
+        else:
+            # LLMが使えない場合はルールベースのみ
+            return rule_based_scores
+    
+    def _calculate_rule_based_scores(
+        self,
+        papers: List[Dict],
+        projects: List[Dict],
+        awards: List[Dict],
+        query: str,
+        research_interests: List[Dict] = None,
+        research_areas: List[Dict] = None
+    ) -> Dict[str, int]:
+        """改良版ルールベーススコア計算"""
+        
+        technical_relevance = self._calculate_technical_relevance_improved(
+            papers, projects, query, research_interests, research_areas
+        )
+        achievements = self._calculate_achievements(papers, projects, awards)
+        practical_applicability = self._calculate_practical_applicability(projects)
         
         total = technical_relevance + achievements + practical_applicability
         
@@ -699,36 +740,148 @@ class ResearchMapAnalyzer:
             "total": total,
             "technical_relevance": technical_relevance,
             "achievements": achievements,
-            "practical_applicability": practical_applicability
+            "practical_applicability": practical_applicability,
+            "calculation_method": "rule_based"
         }
     
-    def _calculate_technical_relevance(self, papers: List[Dict], query: str) -> int:
-        """技術的関連性スコアの計算（最大40点）"""
+    def _extract_query_keywords(self, query: str) -> List[str]:
+        """クエリからキーワードを抽出（同義語展開含む）"""
+        query_lower = query.lower()
+        keywords = [query_lower]  # 元のクエリ
+        
+        # 「がん」「癌」の同義語処理
+        if "がん" in query_lower:
+            keywords.append(query_lower.replace("がん", "癌"))
+            keywords.append(query_lower.replace("がん", ""))  # 「腎臓がん」→「腎臓」
+            # 部分キーワード
+            keywords.append("がん")
+            keywords.append("癌")
+        if "癌" in query_lower:
+            keywords.append(query_lower.replace("癌", "がん"))
+            keywords.append(query_lower.replace("癌", ""))
+            keywords.append("癌")
+            keywords.append("がん")
+        
+        # 「腎臓」と「腎」の同義語処理
+        if "腎臓" in query_lower:
+            keywords.append(query_lower.replace("腎臓", "腎"))
+            keywords.append("腎臓")
+            keywords.append("腎")
+        elif "腎" in query_lower:
+            keywords.append(query_lower.replace("腎", "腎臓"))
+            keywords.append("腎")
+            keywords.append("腎臓")
+        
+        # 「治療」関連
+        if "治療" in query_lower:
+            keywords.append("治療")
+            keywords.append("療法")
+            keywords.append("手術")
+        
+        # スペースで分割されたキーワードも追加
+        keywords.extend(query_lower.split())
+        
+        # 重複を除去して返す
+        return list(set(keywords))
+    
+    def _calculate_technical_relevance_improved(
+        self,
+        papers: List[Dict],
+        projects: List[Dict],
+        query: str,
+        research_interests: List[Dict] = None,
+        research_areas: List[Dict] = None
+    ) -> int:
+        """改良版技術的関連性スコアの計算（最大40点）"""
         score = 0
         query_lower = query.lower()
         
-        # 関連論文数
-        relevant_count = 0
+        # クエリをキーワードに分解（同義語展開含む）
+        query_keywords = self._extract_query_keywords(query_lower)
+        
+        # 1. 研究キーワード・研究分野との関連性（最大15点）
+        keyword_score = 0
+        
+        # research_interestsから
+        if research_interests:
+            for interest in research_interests:
+                keyword_dict = interest.get("keyword", {})
+                research_keyword = keyword_dict.get("ja", "").lower()
+                
+                # 完全一致
+                if query_lower in research_keyword or research_keyword in query_lower:
+                    keyword_score += 5
+                # 部分一致
+                elif any(kw in research_keyword for kw in query_keywords):
+                    keyword_score += 3
+        
+        # research_areasから
+        if research_areas:
+            for area in research_areas:
+                research_field = area.get("research_field", {})
+                field_name = research_field.get("ja", "").lower()
+                
+                research_keyword = area.get("research_keyword", {})
+                if isinstance(research_keyword, dict):
+                    keyword_text = research_keyword.get("ja", "").lower()
+                elif isinstance(research_keyword, str):
+                    keyword_text = research_keyword.lower()
+                else:
+                    keyword_text = ""
+                
+                # フィールドまたはキーワードとの一致をチェック
+                for text in [field_name, keyword_text]:
+                    if text:
+                        if any(kw in text for kw in query_keywords):
+                            keyword_score += 2
+        
+        score += min(15, keyword_score)
+        
+        # 2. プロジェクトとの関連性（最大10点）
+        project_score = 0
+        for project in projects:
+            project_title = project.get("research_project_title") or project.get("project_title", {})
+            
+            if isinstance(project_title, str):
+                title = project_title.lower()
+            elif isinstance(project_title, dict):
+                title = project_title.get("ja", "").lower()
+            else:
+                title = ""
+            
+            # 完全一致または部分一致をチェック
+            if query_lower in title:
+                project_score += 5
+            elif any(kw in title for kw in query_keywords):
+                project_score += 3
+        
+        score += min(10, project_score)
+        
+        # 3. 論文タイトルとの関連性（最大10点）
+        paper_score = 0
         for paper in papers:
-            # paper_title または published_paper_title の両方に対応
             paper_title_data = paper.get("paper_title") or paper.get("published_paper_title", {})
             
             if isinstance(paper_title_data, dict):
-                title_ja = paper_title_data.get("ja", "")
-                title_en = paper_title_data.get("en", "")
+                title_ja = paper_title_data.get("ja", "").lower()
+                title_en = paper_title_data.get("en", "").lower()
             else:
                 title_ja = ""
                 title_en = ""
-                
-            if query_lower in title_ja.lower() or query_lower in title_en.lower():
-                relevant_count += 1
+            
+            # 完全一致または部分一致をチェック
+            if query_lower in title_ja or query_lower in title_en:
+                paper_score += 2  # 完全一致
+            elif any(kw in title_ja or kw in title_en for kw in query_keywords):
+                paper_score += 1  # 部分一致
         
-        # 関連論文数に基づくスコア（最大20点）
-        score += min(20, relevant_count * 4)
+        score += min(10, paper_score)
         
-        # 最新性（最大10点）
-        recent_papers = 0
-        for paper in papers[:10]:
+        # 4. 研究の最新性（最大5点）
+        recent_items = 0
+        
+        # 最近の論文
+        for paper in papers[:5]:
             year = paper.get("publication_date", "")
             if isinstance(year, dict):
                 year = year.get("year", 0)
@@ -738,18 +891,17 @@ class ResearchMapAnalyzer:
                 year = 0
             
             if year >= 2020:
-                recent_papers += 1
-        score += min(10, recent_papers * 2)
+                recent_items += 1
         
-        # 論文の多様性（最大10点）
-        if len(papers) >= 20:
-            score += 10
-        elif len(papers) >= 10:
-            score += 7
-        elif len(papers) >= 5:
-            score += 5
+        # 最近のプロジェクト
+        for project in projects[:3]:
+            to_date = project.get("to_date", "")
+            if not to_date or to_date == "継続中":
+                recent_items += 1
         
-        return score
+        score += min(5, recent_items)
+        
+        return min(40, score)  # 最大40点
     
     def _calculate_achievements(self, papers: List[Dict], projects: List[Dict], awards: List[Dict]) -> int:
         """実績・影響力スコアの計算（最大30点）"""
@@ -863,6 +1015,170 @@ class ResearchMapAnalyzer:
 3. 専門性：{query}分野での研究活動が確認でき、プロジェクトへの貢献が期待できます。
 
 総合的に、この研究者は{query}の分野で一定の専門性と実績を持っており、プロジェクトへの参画が有益と考えられます。"""
+    
+    async def _calculate_llm_based_scores(
+        self,
+        profile: Dict,
+        papers: List[Dict],
+        projects: List[Dict],
+        awards: List[Dict],
+        query: str,
+        research_interests: List[Dict] = None
+    ) -> Dict[str, int]:
+        """LLMを使用したスコア計算"""
+        
+        # 研究キーワードを抽出
+        keywords = self._extract_research_keywords(research_interests or [], [])
+        
+        # プロジェクトタイトルのリスト作成
+        project_titles = []
+        for project in projects[:5]:  # 最新5件
+            project_title = project.get("research_project_title") or project.get("project_title", {})
+            if isinstance(project_title, str):
+                project_titles.append(project_title)
+            elif isinstance(project_title, dict):
+                title = project_title.get("ja", project_title.get("en", ""))
+                if title:
+                    project_titles.append(title)
+        
+        # 構造化されたプロンプト
+        prompt = f"""以下の研究者情報を基に、検索クエリ「{query}」との関連性を評価してください。
+
+【研究者情報】
+- 研究キーワード: {', '.join(keywords[:10]) if keywords else 'なし'}
+- 論文数: {len(papers)}件
+- プロジェクト: {project_titles}
+- 受賞歴: {len(awards)}件
+
+【評価基準】
+1. 技術的関連性（0-40点）
+   - 研究内容とクエリの直接的な関連性
+   - 研究キーワードの一致度
+   - 関連論文・プロジェクトの有無
+   - 同義語や類似概念も考慮（例：「癌」と「がん」、「腎」と「腎臓」）
+
+2. 実績・影響力（0-30点）
+   - 論文数と質
+   - プロジェクト実績
+   - 受賞歴
+
+3. 実用化可能性（0-30点）
+   - 産学連携の実績
+   - 実用的なプロジェクトの有無
+   - 治療法や技術の実装可能性
+
+【重要】
+- 各項目の点数は必ず指定された範囲内で採点してください
+- 部分的な関連性も適切に評価してください
+- 「腎癌」と「腎臓がん」のような同義語は同等に扱ってください
+
+【出力形式】
+必ず以下のJSON形式で出力してください：
+{{
+    "technical_relevance": 数値（0-40）,
+    "achievements": 数値（0-30）,
+    "practical_applicability": 数値（0-30）,
+    "reasoning": {{
+        "technical_relevance": "採点理由",
+        "achievements": "採点理由",
+        "practical_applicability": "採点理由"
+    }}
+}}"""
+        
+        try:
+            if "gemini" in self.model_name:
+                response = self.llm_model.generate_content(
+                    prompt,
+                    generation_config={
+                        "temperature": 0,  # 一貫性のため
+                        "max_output_tokens": 400,
+                        "top_p": 0.8
+                    }
+                )
+                response_text = response.text.strip()
+            else:
+                response = self.llm_model.predict(
+                    prompt,
+                    temperature=0,
+                    max_output_tokens=400,
+                    top_p=0.8
+                )
+                response_text = response.text.strip()
+            
+            # JSONを抽出（マークダウンコードブロックに対応）
+            if "```json" in response_text:
+                json_start = response_text.find("```json") + 7
+                json_end = response_text.find("```", json_start)
+                response_text = response_text[json_start:json_end].strip()
+            elif "```" in response_text:
+                json_start = response_text.find("```") + 3
+                json_end = response_text.find("```", json_start)
+                response_text = response_text[json_start:json_end].strip()
+            
+            # JSONパース
+            scores = json.loads(response_text)
+            
+            # スコアの範囲チェックと型変換
+            scores["technical_relevance"] = int(min(40, max(0, scores.get("technical_relevance", 0))))
+            scores["achievements"] = int(min(30, max(0, scores.get("achievements", 0))))
+            scores["practical_applicability"] = int(min(30, max(0, scores.get("practical_applicability", 0))))
+            scores["total"] = scores["technical_relevance"] + scores["achievements"] + scores["practical_applicability"]
+            scores["calculation_method"] = "llm_based"
+            
+            # reasoning情報も保持
+            if "reasoning" in scores:
+                scores["score_reasons"] = scores.pop("reasoning")
+            
+            logger.info(f"LLMスコア計算成功: {scores}")
+            return scores
+            
+        except Exception as e:
+            logger.error(f"LLMスコア計算エラー: {e}")
+            # エラー時はルールベースにフォールバック
+            raise e
+    
+    def _calculate_hybrid_scores(
+        self,
+        rule_based_scores: Dict[str, int],
+        llm_scores: Dict[str, int],
+        weight: float = 0.5
+    ) -> Dict[str, int]:
+        """ルールベースとLLMスコアの加重平均"""
+        
+        hybrid_scores = {}
+        
+        # 各スコアの加重平均を計算
+        for key in ["technical_relevance", "achievements", "practical_applicability"]:
+            rule_score = rule_based_scores.get(key, 0)
+            llm_score = llm_scores.get(key, 0)
+            
+            # 加重平均（小数点以下は四捨五入）
+            hybrid_scores[key] = int(round(
+                rule_score * (1 - weight) + llm_score * weight
+            ))
+        
+        # 合計スコア
+        hybrid_scores["total"] = sum([
+            hybrid_scores["technical_relevance"],
+            hybrid_scores["achievements"],
+            hybrid_scores["practical_applicability"]
+        ])
+        
+        # メタ情報
+        hybrid_scores["calculation_method"] = "hybrid"
+        hybrid_scores["rule_weight"] = 1 - weight
+        hybrid_scores["llm_weight"] = weight
+        
+        # 各手法のスコアも保持（デバッグ用）
+        hybrid_scores["rule_based_scores"] = rule_based_scores
+        hybrid_scores["llm_scores"] = llm_scores
+        
+        # LLMの採点理由があれば含める
+        if "score_reasons" in llm_scores:
+            hybrid_scores["score_reasons"] = llm_scores["score_reasons"]
+        
+        logger.info(f"ハイブリッドスコア計算完了: {hybrid_scores}")
+        return hybrid_scores
     
     def _create_error_response(self, error_message: str) -> Dict[str, Any]:
         """エラーレスポンスの作成"""
