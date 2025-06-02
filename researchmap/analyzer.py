@@ -528,23 +528,36 @@ class ResearchMapAnalyzer:
                 day = application_date.get("day", "")
                 application_date = f"{year}/{month}/{day}" if year else "不明"
             
-            # 発明者
-            inventors = patent.get("inventors", [])
-            inventor_names = []
-            for inventor in inventors:
-                if isinstance(inventor, dict):
-                    name = inventor.get("name", {})
-                    if isinstance(name, dict):
-                        inventor_names.append(name.get("ja", name.get("en", "")))
-                    elif isinstance(name, str):
-                        inventor_names.append(name)
+            # 特許権者（出願人）の取得
+            applicants = patent.get("applicants", [])
+            applicant_names = []
+            for applicant in applicants:
+                if isinstance(applicant, dict):
+                    applicant_info = applicant.get("applicant", {})
+                    if isinstance(applicant_info, dict):
+                        applicant_names.append(applicant_info.get("ja", applicant_info.get("en", "")))
+                    elif isinstance(applicant_info, str):
+                        applicant_names.append(applicant_info)
+            
+            # 特許権者が取得できない場合は発明者を使用（フォールバック）
+            if not applicant_names:
+                inventors = patent.get("inventors", {})
+                if isinstance(inventors, dict) and "ja" in inventors:
+                    inventor_list = inventors.get("ja", [])
+                    for inventor in inventor_list:
+                        if isinstance(inventor, dict):
+                            name = inventor.get("name", {})
+                            if isinstance(name, dict):
+                                applicant_names.append(name.get("ja", name.get("en", "")))
+                            elif isinstance(name, str):
+                                applicant_names.append(name)
             
             key_patents.append({
                 "title": title,
                 "application_number": application_number,
                 "patent_number": patent_number,
                 "application_date": application_date,
-                "inventors": ", ".join(inventor_names) if inventor_names else "発明者不明"
+                "patent_holders": "、".join(applicant_names) if applicant_names else "特許権者不明"
             })
         
         return key_patents

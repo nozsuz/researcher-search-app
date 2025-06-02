@@ -646,7 +646,7 @@ async def analyze_researcher(request: ResearcherAnalysisRequest):
                     "application_number": "特2023-123456",
                     "patent_number": "特許第6789012号",
                     "application_date": "2023/04/01",
-                    "inventors": "研究者他"
+                    "patent_holders": "株式会社サンプル、東京大学"
                 }
             ]
             }
