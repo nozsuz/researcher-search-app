@@ -394,9 +394,23 @@ class ResearchMapAnalyzer:
         
         for project in projects[:limit]:  # 最新のものから
             # タイトルの取得
-            title = project.get("project_title", {}).get("ja", "")
+            project_title = project.get("project_title", {})
+            
+            # project_titleが文字列の場合とオブジェクトの場合に対応
+            if isinstance(project_title, str):
+                title = project_title
+            elif isinstance(project_title, dict):
+                title = project_title.get("ja", "")
+                if not title:
+                    title = project_title.get("en", "")
+            else:
+                title = "タイトル不明"
+                logger.warning(f"予期しないproject_titleの型: {type(project_title)}")
+            
+            # タイトルが取得できなかった場合のデバッグ情報
             if not title:
-                title = project.get("project_title", {}).get("en", "")
+                logger.info(f"プロジェクトタイトルが空: {project_title}")
+                title = "タイトル不明"
             
             # 期間の取得
             from_date = project.get("from_date", "")
@@ -420,8 +434,9 @@ class ResearchMapAnalyzer:
             
             period = f"{start_year}-{end_year}"
             
+            # タイトルを文字列に変換（念のため）
             key_projects.append({
-                "title": title,
+                "title": str(title) if title else "タイトル不明",
                 "period": period
             })
         
