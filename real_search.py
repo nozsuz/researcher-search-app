@@ -27,9 +27,12 @@ async def perform_real_search(request) -> Dict[str, Any]:
         logger.info(f"🔍 実際の検索開始: {request.query}, method: {request.method}")
         logger.info(f"📊 全パラメータ: query={request.query}, method={request.method}, max_results={request.max_results}, use_llm_expansion={request.use_llm_expansion}, use_llm_summary={request.use_llm_summary}, use_internal_evaluation={getattr(request, 'use_internal_evaluation', 'NONE')}")
         
-        # AI要約がONの場合、常に内部評価モードを使用
-        use_internal_evaluation = request.use_llm_summary or getattr(request, 'use_internal_evaluation', False)
-        logger.info(f"📊 評価モード: {'内部評価（AI関連性分析）' if use_internal_evaluation else '従来方式'}")
+        # 内部評価モードは無効化（常にFalse）
+        use_internal_evaluation = False
+        # AI要約モードの判定
+        use_ai_summary = request.use_llm_summary
+        logger.info(f"📊 評価モード: 標準検索")
+        logger.info(f"📊 AI要約: {'ON' if use_ai_summary else 'OFF'}")
         
         # GCPクライアントを取得
         from gcp_auth import get_bigquery_client, is_vertex_ai_ready
@@ -125,18 +128,15 @@ async def perform_real_search(request) -> Dict[str, Any]:
                 # エラー時は従来方式にフォールバック
                 use_internal_evaluation = False
         
-        # 従来方式の処理（AI関連性分析がOFFの場合）
+        # 従来方式の処理（内部評価がOFFの場合）
         if not use_internal_evaluation:
-            # セマンティック検索でもキーワード検索でも、
-            # use_llm_summaryがfalseの場合はLLM要約を生成しない
-            if request.use_llm_summary and results and vertex_ai_available:
-                # ここでLLM要約を生成するが、
-                # 両方とも同じフォーマットの要約を生成
+            # AI要約が要求されている場合
+            if use_ai_summary and results and vertex_ai_available:
                 try:
                     results = await add_llm_summaries(results, request.query)
-                    logger.info("🤖 LLM要約を追加完了")
+                    logger.info("🤖 AI要約を追加完了")
                 except Exception as e:
-                    logger.warning(f"⚠️ LLM要約生成失敗: {e}")
+                    logger.warning(f"⚠️ AI要約生成失敗: {e}")
         
         execution_time = time.time() - start_time
         
@@ -146,7 +146,7 @@ async def perform_real_search(request) -> Dict[str, Any]:
             executed_query_info += ", 評価モード: 内部評価"
         if request.use_llm_expansion and vertex_ai_available and request.method != "semantic":
             executed_query_info += ", キーワード拡張: ON"
-        if request.use_llm_summary and vertex_ai_available and not use_internal_evaluation:
+        if use_ai_summary and vertex_ai_available:
             executed_query_info += ", AI要約: ON"
         executed_query_info += f", 実行時間: {execution_time:.2f}秒)"
         
