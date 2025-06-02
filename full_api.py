@@ -12,6 +12,7 @@ import os
 import time
 from typing import List, Optional
 import logging
+from analysis_storage import AnalysisStorage
 
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +47,9 @@ clients = {
     "summary_llm_model": None,
     "embedding_model": None
 }
+
+# AnalysisStorageインスタンス
+analysis_storage = AnalysisStorage()
 
 class SearchRequest(BaseModel):
     query: str
@@ -474,6 +478,21 @@ class ResearchMapAnalysisResponse(BaseModel):
     analysis: Optional[dict] = None
     error: Optional[str] = None
 
+# 分析結果保存用のモデル
+class SaveAnalysisRequest(BaseModel):
+    researchmap_url: str
+    researcher_name: str
+    query: str
+    analysis_result: dict
+    relevance_score: Optional[float] = None
+    affiliation: Optional[str] = None
+    session_id: Optional[str] = None
+
+class GetAnalysesRequest(BaseModel):
+    session_id: Optional[str] = None
+    query: Optional[str] = None
+    limit: int = 50
+
 @app.post("/api/analyze-researcher", response_model=ResearchMapAnalysisResponse)
 async def analyze_researcher_detail(request: ResearchMapAnalysisRequest):
     """
@@ -510,6 +529,41 @@ async def analyze_researcher_detail(request: ResearchMapAnalysisRequest):
             status="error",
             error=str(e)
         )
+
+# 分析結果保存エンドポイント
+@app.post("/api/save-analysis")
+async def save_analysis(request: SaveAnalysisRequest):
+    """分析結果を保存"""
+    result = await analysis_storage.save_analysis(
+        researchmap_url=request.researchmap_url,
+        researcher_name=request.researcher_name,
+        query=request.query,
+        analysis_result=request.analysis_result,
+        relevance_score=request.relevance_score,
+        affiliation=request.affiliation,
+        session_id=request.session_id
+    )
+    return result
+
+@app.post("/api/get-saved-analyses")
+async def get_saved_analyses(request: GetAnalysesRequest):
+    """保存済み分析を取得"""
+    results = await analysis_storage.get_analyses(
+        session_id=request.session_id,
+        query=request.query,
+        limit=request.limit
+    )
+    return {
+        "status": "success",
+        "analyses": results,
+        "total": len(results)
+    }
+
+@app.delete("/api/delete-analysis/{analysis_id}")
+async def delete_analysis(analysis_id: str, session_id: str = Query(...)):
+    """分析結果を削除"""
+    result = await analysis_storage.delete_analysis(analysis_id, session_id)
+    return result
 
 # エラーハンドラー
 @app.exception_handler(Exception)
