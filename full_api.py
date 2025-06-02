@@ -463,6 +463,187 @@ async def search_researchers_get(
     )
     return await search_researchers(request)
 
+# ResearchMap詳細分析のためのモデル
+class ResearchMapAnalysisRequest(BaseModel):
+    researchmap_url: str
+    query: str
+    researcher_basic_info: Optional[dict] = None
+
+class ResearchMapAnalysisResponse(BaseModel):
+    status: str
+    analysis: Optional[dict] = None
+    error: Optional[str] = None
+
+@app.post("/api/analyze-researcher", response_model=ResearchMapAnalysisResponse)
+async def analyze_researcher_detail(request: ResearchMapAnalysisRequest):
+    """
+    ResearchMap APIから詳細情報を取得してLLMで分析
+    """
+    try:
+        import aiohttp
+        import json
+        from vertexai.generative_models import GenerativeModel
+        
+        # ResearchMap APIのURLを構築
+        # researchmap_url から研究者IDを抽出
+        # 例: https://researchmap.jp/ko_nishino -> ko_nishino
+        researcher_id = request.researchmap_url.split('/')[-1]
+        api_url = f"https://api.researchmap.jp/{researcher_id}?format=json"
+        
+        logger.info(f"🔍 ResearchMap API呼び出し: {api_url}")
+        
+        # ResearchMap APIから情報を取得
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url) as response:
+                if response.status != 200:
+                    raise Exception(f"ResearchMap API error: {response.status}")
+                    
+                researcher_data = await response.json()
+        
+        # データの整理
+        # 論文情報を抽出（最新20件）
+        papers = []
+        if '@graph' in researcher_data:
+            for item in researcher_data['@graph']:
+                if item.get('@type') == 'published_papers':
+                    for paper in item.get('items', [])[:20]:
+                        paper_info = {
+                            'title_ja': paper.get('paper_title', {}).get('ja', ''),
+                            'title_en': paper.get('paper_title', {}).get('en', ''),
+                            'year': paper.get('publication_date', '')[:4] if paper.get('publication_date') else '',
+                            'journal': paper.get('publication_name', {}).get('en', paper.get('publication_name', {}).get('ja', ''))
+                        }
+                        papers.append(paper_info)
+        
+        # プロジェクト情報
+        projects = []
+        if '@graph' in researcher_data:
+            for item in researcher_data['@graph']:
+                if item.get('@type') == 'research_projects':
+                    for project in item.get('items', [])[:5]:
+                        project_info = {
+                            'title': project.get('research_project_title', {}).get('ja', ''),
+                            'period': f"{project.get('from_date', '')} - {project.get('to_date', '')}",
+                            'role': project.get('research_project_owner_role', '')
+                        }
+                        projects.append(project_info)
+        
+        # 受賞歴
+        awards = []
+        if '@graph' in researcher_data:
+            for item in researcher_data['@graph']:
+                if item.get('@type') == 'awards':
+                    for award in item.get('items', [])[:10]:
+                        award_info = {
+                            'name': award.get('award_name', {}).get('ja', '') or award.get('award_name', {}).get('en', ''),
+                            'year': award.get('award_date', '')
+                        }
+                        awards.append(award_info)
+        
+        # LLMで詳細分析
+        model = GenerativeModel("gemini-2.0-flash-001")
+        
+        # 分析用プロンプト
+        prompt = f"""以下の研究者の詳細情報を分析し、企業ニーズ「{request.query}」との関連性を評価してください。
+
+【基本情報】
+氏名: {researcher_data.get('display_name', {}).get('ja', '')} ({researcher_data.get('display_name', {}).get('en', '')})
+所属: {researcher_data.get('affiliations', [{}])[0].get('affiliation', {}).get('ja', '') if researcher_data.get('affiliations') else ''}
+
+【研究キーワード】
+{', '.join([item.get('keyword', {}).get('ja', '') for graph_item in researcher_data.get('@graph', []) if graph_item.get('@type') == 'research_interests' for item in graph_item.get('items', [])])}
+
+【最近の論文】（最新20件）
+{chr(10).join([f"- [{p['year']}] {p['title_ja'] or p['title_en']} ({p['journal']})" for p in papers[:20]])}
+
+【研究プロジェクト】
+{chr(10).join([f"- {p['title']} ({p['period']})" for p in projects])}
+
+【受賞歴】
+{chr(10).join([f"- [{a['year']}] {a['name']}" for a in awards[:10]])}
+
+以下の観点で詳細に分析してください：
+
+1. **技術的関連性（40点満点）**
+   - 論文タイトルから読み取れる専門技術と企業ニーズの一致度
+   - 研究の深さと応用可能性
+
+2. **実績・影響力（30点満点）**
+   - 論文数と質（英語論文の有無、国際会議発表など）
+   - 受賞歴や研究プロジェクトの規模
+
+3. **実用化可能性（30点満点）**
+   - 産学連携の経験（プロジェクトから推測）
+   - 研究成果の実用化への距離
+
+各項目の点数と理由を明確に示し、最後に100点満点の総合評価点を提示してください。
+"""
+        
+        response = model.generate_content(
+            prompt,
+            generation_config={
+                "temperature": 0.2,
+                "max_output_tokens": 1500,
+                "top_p": 0.8
+            }
+        )
+        
+        analysis_text = response.text.strip()
+        
+        # 分析結果から点数を抽出する簡易パーサー
+        import re
+        
+        scores = {
+            'technical_relevance': 0,
+            'achievements': 0,
+            'practical_applicability': 0,
+            'total': 0
+        }
+        
+        # 総合評価点を探す
+        total_match = re.search(r'総合評価[：:：\s]*(\d+)[点/]', analysis_text)
+        if total_match:
+            scores['total'] = int(total_match.group(1))
+        
+        # 個別スコアを探す
+        tech_match = re.search(r'技術的関連性[：:：\s]*(\d+)[点/]', analysis_text)
+        if tech_match:
+            scores['technical_relevance'] = int(tech_match.group(1))
+            
+        achievement_match = re.search(r'実績・影響力[：:：\s]*(\d+)[点/]', analysis_text)
+        if achievement_match:
+            scores['achievements'] = int(achievement_match.group(1))
+            
+        practical_match = re.search(r'実用化可能性[：:：\s]*(\d+)[点/]', analysis_text)
+        if practical_match:
+            scores['practical_applicability'] = int(practical_match.group(1))
+        
+        # 分析結果を構造化
+        analysis_result = {
+            'researcher_name': researcher_data.get('display_name', {}).get('ja', ''),
+            'affiliation': researcher_data.get('affiliations', [{}])[0].get('affiliation', {}).get('ja', '') if researcher_data.get('affiliations') else '',
+            'total_papers': len(papers),
+            'total_projects': len(projects),
+            'total_awards': len(awards),
+            'scores': scores,
+            'detailed_analysis': analysis_text,
+            'top_papers': papers[:5],
+            'key_projects': projects[:3],
+            'major_awards': awards[:5]
+        }
+        
+        return ResearchMapAnalysisResponse(
+            status="success",
+            analysis=analysis_result
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ ResearchMap分析エラー: {e}")
+        return ResearchMapAnalysisResponse(
+            status="error",
+            error=str(e)
+        )
+
 # エラーハンドラー
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
