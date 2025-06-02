@@ -450,7 +450,7 @@ class ResearchMapAnalyzer:
                 keywords.append(research_keyword["ja"])
             elif isinstance(research_keyword, str) and research_keyword:
                 # カンマ区切りのキーワードを分割
-                keywords.extend([k.strip() for k in research_keyword.split(‘、’)])
+                keywords.extend([k.strip() for k in research_keyword.split("、")])
         
         # 重複を除去
         return list(dict.fromkeys(keywords))
