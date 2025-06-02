@@ -55,10 +55,6 @@ class SearchRequest(BaseModel):
     use_llm_summary: bool = False
     use_internal_evaluation: bool = False  # 内部評価モードのフラグ
 
-class AnalyzeRequest(BaseModel):
-    researcher: dict  # 研究者データ
-    query: str  # 検索クエリ
-
 class ResearcherResult(BaseModel):
     name_ja: Optional[str] = None
     name_en: Optional[str] = None
@@ -564,77 +560,6 @@ async def general_exception_handler(request, exc):
         status_code=500,
         content={"detail": f"内部サーバーエラー: {str(exc)}"}
     )
-
-@app.post("/api/analyze")
-async def analyze_researcher(request: AnalyzeRequest):
-    """
-    研究者のAI関連性分析エンドポイント
-    """
-    start_time = time.time()
-    
-    logger.info(f"🤖 AI分析リクエスト: {request.researcher.get('name_ja', 'Unknown')} vs {request.query}")
-    
-    try:
-        # 評価システムを使用して分析
-        from evaluation_system import UniversalResearchEvaluator
-        evaluator = UniversalResearchEvaluator()
-        
-        # 単一の研究者を評価
-        evaluations = await evaluator.evaluate_researchers(
-            [request.researcher], 
-            request.query,
-            use_internal_evaluation=True
-        )
-        
-        if evaluations:
-            evaluation = evaluations[0]
-            
-            # 結果をフォーマット
-            result = {
-                "status": "success",
-                "summary": evaluation.summary,
-                "total_score": evaluation.total_score,
-                "scores": evaluation.scores,
-                "score_reasons": evaluation.score_reasons,
-                "strengths": evaluation.strengths,
-                "execution_time": time.time() - start_time
-            }
-            
-            logger.info(f"✅ AI分析完了: スコア {evaluation.total_score}/10")
-            return result
-        else:
-            raise Exception("評価結果が取得できませんでした")
-            
-    except Exception as e:
-        logger.error(f"❌ AI分析エラー: {e}")
-        
-        # フォールバックとして簡易分析を返す
-        return {
-            "status": "fallback",
-            "summary": f"「{request.query}」に関する研究を行っている研究者です。研究キーワードやプロフィールから、関連性が認められます。",
-            "total_score": 7.0,
-            "scores": {
-                "keyword_match": 7,
-                "research_directness": 7,
-                "expertise_depth": 7,
-                "practical_evidence": 7,
-                "research_quality": 7,
-                "interdisciplinary": 7,
-                "recency": 7
-            },
-            "score_reasons": {
-                "keyword_match": "キーワードに関連語が含まれています",
-                "research_directness": "研究内容がクエリと関連しています",
-                "expertise_depth": "該当分野での専門性があります",
-                "practical_evidence": "具体的な研究実績があります",
-                "research_quality": "一定の研究レベルが認められます",
-                "interdisciplinary": "幅広い応用可能性があります",
-                "recency": "最近の研究活動が確認されます"
-            },
-            "strengths": ["専門性", "実績", "応用可能性"],
-            "execution_time": time.time() - start_time,
-            "error_message": str(e)
-        }
 
 if __name__ == "__main__":
     import uvicorn

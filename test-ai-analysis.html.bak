@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI関連性分析APIテスト</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #667eea;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #333;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e1e1e1;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            display: none;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .score-badge {
+            background: #4caf50;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            display: inline-block;
+            margin: 10px 0;
+        }
+        .score-details {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+        }
+        .score-item {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .score-item:last-child {
+            border-bottom: none;
+        }
+        .score-reason {
+            color: #666;
+            font-size: 14px;
+            margin-left: 20px;
+            font-style: italic;
+        }
+        .strength-tag {
+            background: #2196F3;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 15px;
+            display: inline-block;
+            margin: 2px;
+            font-size: 14px;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .test-links {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e3f2fd;
+            border-radius: 5px;
+        }
+        .test-links h3 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+        .test-links a {
+            color: #1976d2;
+            text-decoration: none;
+            display: block;
+            margin: 5px 0;
+        }
+        .test-links a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 AI関連性分析APIテスト</h1>
+        
+        <div class="form-group">
+            <label for="api-url">APIベースURL:</label>
+            <input type="text" id="api-url" value="http://localhost:8000" placeholder="例: http://localhost:8000">
+        </div>
+        
+        <div class="form-group">
+            <label for="query">検索クエリ:</label>
+            <input type="text" id="query" value="人工知能" placeholder="例: ナノテクノロジー">
+        </div>
+        
+        <div class="form-group">
+            <label for="name">研究者名:</label>
+            <input type="text" id="name" value="山田太郎" placeholder="例: 鈴木一郎">
+        </div>
+        
+        <div class="form-group">
+            <label for="affiliation">所属機関:</label>
+            <input type="text" id="affiliation" value="東京大学" placeholder="例: 京都大学">
+        </div>
+        
+        <div class="form-group">
+            <label for="keywords">研究キーワード（カンマ区切り）:</label>
+            <input type="text" id="keywords" value="人工知能, 機械学習, 深層学習" placeholder="例: ナノ材料, 微細加工">
+        </div>
+        
+        <button onclick="testAnalyze()">AI分析を実行</button>
+        <button onclick="directApiTest()" style="background: #ff9800;">GET APIを直接テスト</button>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>AI分析を実行中...</p>
+        </div>
+        
+        <div id="result"></div>
+        
+        <div class="test-links">
+            <h3>📌 直接アクセス用のテストリンク</h3>
+            <div id="test-links-content"></div>
+        </div>
+    </div>
+
+    <script>
+        // ページ読み込み時にテストリンクを更新
+        window.onload = function() {
+            updateTestLinks();
+        };
+        
+        // 入力値が変更されたときにテストリンクを更新
+        document.querySelectorAll('input').forEach(input => {
+            input.addEventListener('input', updateTestLinks);
+        });
+        
+        function updateTestLinks() {
+            const baseUrl = document.getElementById('api-url').value;
+            const query = document.getElementById('query').value;
+            const name = document.getElementById('name').value;
+            const affiliation = document.getElementById('affiliation').value;
+            const keywords = document.getElementById('keywords').value;
+            
+            const testUrl = `${baseUrl}/test/analyze?query=${encodeURIComponent(query)}&name=${encodeURIComponent(name)}&affiliation=${encodeURIComponent(affiliation)}&keywords=${encodeURIComponent(keywords)}`;
+            
+            document.getElementById('test-links-content').innerHTML = `
+                <p>以下のURLをブラウザで直接開いてテストできます：</p>
+                <a href="${testUrl}" target="_blank">${testUrl}</a>
+                <p style="margin-top: 10px;">または、curlコマンドでテスト：</p>
+                <pre>curl "${testUrl}"</pre>
+            `;
+        }
+        
+        async function testAnalyze() {
+            const baseUrl = document.getElementById('api-url').value;
+            const query = document.getElementById('query').value;
+            const name = document.getElementById('name').value;
+            const affiliation = document.getElementById('affiliation').value;
+            const keywords = document.getElementById('keywords').value;
+            
+            const loadingDiv = document.getElementById('loading');
+            const resultDiv = document.getElementById('result');
+            
+            loadingDiv.style.display = 'block';
+            resultDiv.innerHTML = '';
+            
+            try {
+                // GETリクエストでテスト
+                const url = `${baseUrl}/test/analyze?query=${encodeURIComponent(query)}&name=${encodeURIComponent(name)}&affiliation=${encodeURIComponent(affiliation)}&keywords=${encodeURIComponent(keywords)}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${JSON.stringify(data)}`);
+                }
+                
+                displayResult(data);
+                
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <div class="result" style="border-left-color: #f44336;">
+                        <h2 style="color: #f44336;">❌ エラー</h2>
+                        <p>${error.message}</p>
+                        <p>バックエンドサーバーが起動しているか確認してください。</p>
+                    </div>
+                `;
+            } finally {
+                loadingDiv.style.display = 'none';
+            }
+        }
+        
+        async function directApiTest() {
+            const baseUrl = document.getElementById('api-url').value;
+            const query = document.getElementById('query').value;
+            const name = document.getElementById('name').value;
+            const affiliation = document.getElementById('affiliation').value;
+            const keywords = document.getElementById('keywords').value;
+            
+            const url = `${baseUrl}/test/analyze?query=${encodeURIComponent(query)}&name=${encodeURIComponent(name)}&affiliation=${encodeURIComponent(affiliation)}&keywords=${encodeURIComponent(keywords)}`;
+            
+            window.open(url, '_blank');
+        }
+        
+        function displayResult(data) {
+            const resultDiv = document.getElementById('result');
+            
+            let html = '<div class="result">';
+            
+            if (data.status === 'success') {
+                html += '<h2 style="color: #4caf50;">✅ AI分析成功</h2>';
+            } else {
+                html += '<h2 style="color: #ff9800;">⚠️ フォールバック分析</h2>';
+            }
+            
+            // 実行時間
+            html += `<p><strong>実行時間:</strong> ${data.execution_time.toFixed(3)}秒</p>`;
+            
+            // 総合スコア
+            if (data.total_score) {
+                html += `<div class="score-badge">総合スコア: ${data.total_score}/10</div>`;
+            }
+            
+            // 要約
+            if (data.summary) {
+                html += `
+                    <div style="margin: 15px 0;">
+                        <h3>📝 AI関連性分析（要約）</h3>
+                        <p>${data.summary}</p>
+                    </div>
+                `;
+            }
+            
+            // 強み
+            if (data.strengths && data.strengths.length > 0) {
+                html += `
+                    <div style="margin: 15px 0;">
+                        <h3>💪 強み</h3>
+                        ${data.strengths.map(s => `<span class="strength-tag">${s}</span>`).join('')}
+                    </div>
+                `;
+            }
+            
+            // 詳細スコア
+            if (data.scores) {
+                html += `
+                    <div class="score-details">
+                        <h3>📊 詳細スコア</h3>
+                `;
+                
+                const scoreLabels = {
+                    keyword_match: 'キーワード一致度',
+                    research_directness: '研究の直接性',
+                    expertise_depth: '専門性の深さ',
+                    practical_evidence: '具体的実績',
+                    research_quality: '研究の質',
+                    interdisciplinary: '学際性',
+                    recency: '最新性'
+                };
+                
+                for (const [key, value] of Object.entries(data.scores)) {
+                    const reason = data.score_reasons && data.score_reasons[key] || '';
+                    html += `
+                        <div class="score-item">
+                            <strong>${scoreLabels[key] || key}:</strong> ${value}/10
+                            ${reason ? `<div class="score-reason">${reason}</div>` : ''}
+                        </div>
+                    `;
+                }
+                
+                html += '</div>';
+            }
+            
+            // テスト情報
+            if (data.test_info) {
+                html += `
+                    <details style="margin-top: 20px;">
+                        <summary style="cursor: pointer; font-weight: bold;">🔍 テスト詳細情報</summary>
+                        <pre>${JSON.stringify(data.test_info, null, 2)}</pre>
+                    </details>
+                `;
+            }
+            
+            // 完全なレスポンス
+            html += `
+                <details style="margin-top: 20px;">
+                    <summary style="cursor: pointer; font-weight: bold;">📄 完全なAPIレスポンス</summary>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                </details>
+            `;
+            
+            html += '</div>';
+            
+            resultDiv.innerHTML = html;
+        }
+    </script>
+</body>
+</html>
