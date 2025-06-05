@@ -389,7 +389,27 @@ async def search_researchers(request: SearchRequest):
                 logger.info(f"  - is_young_researcher: {first_result.get('is_young_researcher', 'NOT FOUND')}")
                 logger.info(f"  - young_researcher_reasons: {first_result.get('young_researcher_reasons', 'NOT FOUND')}")
             
-            return SearchResponse(**result)
+            # SearchResponseを作成する前に、結果をResearcherResultオブジェクトに変換
+            response = SearchResponse(
+                status=result["status"],
+                query=result["query"],
+                method=result["method"],
+                results=[ResearcherResult(**r) for r in result["results"]],
+                total=result["total"],
+                execution_time=result["execution_time"],
+                executed_query_info=result.get("executed_query_info"),
+                expanded_info=result.get("expanded_info")
+            )
+            
+            # デバッグ：SearchResponse作成後の確認
+            if response.results and len(response.results) > 0:
+                first_response_result = response.results[0]
+                logger.info(f"📦 SearchResponse作成後の最初の結果:")
+                logger.info(f"  - name_ja: {first_response_result.name_ja}")
+                logger.info(f"  - is_young_researcher: {first_response_result.is_young_researcher}")
+                logger.info(f"  - young_researcher_reasons: {first_response_result.young_researcher_reasons}")
+            
+            return response
         else:
             logger.warning(f"⚠️ 実際の検索失敗、モックにフォールバック: {result.get('error_message')}")
             
