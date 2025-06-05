@@ -54,12 +54,17 @@ class SearchRequest(BaseModel):
     use_llm_expansion: bool = False
     use_llm_summary: bool = False
     use_internal_evaluation: bool = False  # 内部評価モードのフラグ
+    young_researcher_filter: bool = False  # 若手研究者フィルタ
 
 class ResearcherResult(BaseModel):
     name_ja: Optional[str] = None
     name_en: Optional[str] = None
     main_affiliation_name_ja: Optional[str] = None
     main_affiliation_name_en: Optional[str] = None
+    main_affiliation_job_ja: Optional[str] = None
+    main_affiliation_job_title_ja: Optional[str] = None
+    main_affiliation_job_en: Optional[str] = None
+    main_affiliation_job_title_en: Optional[str] = None
     research_keywords_ja: Optional[str] = None
     research_fields_ja: Optional[str] = None
     profile_ja: Optional[str] = None
@@ -69,6 +74,8 @@ class ResearcherResult(BaseModel):
     relevance_score: Optional[float] = None
     distance: Optional[float] = None
     llm_summary: Optional[str] = None
+    is_young_researcher: Optional[bool] = None
+    young_researcher_reasons: Optional[List[str]] = None
 
 class EvaluatedResult(BaseModel):
     """内部評価モードの結果"""
