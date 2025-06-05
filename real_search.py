@@ -5,7 +5,9 @@ BigQuery + Vertex AI + 評価システムを使用した本格的な検索シス
 
 import logging
 import time
-from typing import Dict, List, Optional, Any
+import re
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple
 from google.cloud import bigquery
 from vertexai.language_models import TextGenerationModel, TextEmbeddingModel
 from vertexai.generative_models import GenerativeModel
@@ -16,6 +18,138 @@ logger = logging.getLogger(__name__)
 
 # 評価システムのインスタンスをグローバルに保持
 evaluator = UniversalResearchEvaluator()
+
+def is_young_researcher(researcher_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    """
+    若手研究者かどうかを判定（第三段階まで実装）
+    
+    Returns:
+        Tuple[bool, List[str]]: (若手研究者フラグ, 判定理由のリスト)
+    """
+    reasons = []
+    
+    # 第1段階：職位による判定
+    job_ja = (researcher_data.get('main_affiliation_job_ja', '') or '').lower()
+    job_title_ja = (researcher_data.get('main_affiliation_job_title_ja', '') or '').lower()
+    job_en = (researcher_data.get('main_affiliation_job_en', '') or '').lower()
+    job_title_en = (researcher_data.get('main_affiliation_job_title_en', '') or '').lower()
+    
+    # 若手研究者の職位（日本語）
+    young_positions_ja = [
+        '助教', '准教授', '博士研究員', 'ポスドク', '研究員', 
+        '特任助教', '特任准教授', '助手', '講師', '特任研究員',
+        '博士後期課程', '博士課程', 'ポストドクトラル', '日本学術振興会特別研究員',
+        'jsps特別研究員', '特別研究員', '博士学生', '大学院生'
+    ]
+    
+    # 若手研究者の職位（英語）
+    young_positions_en = [
+        'assistant', 'associate professor', 'postdoc', 'researcher', 
+        'fellow', 'doctoral', 'phd student', 'graduate student',
+        'research associate', 'post-doctoral', 'jsps fellow'
+    ]
+    
+    # シニア研究者の職位（除外条件）
+    senior_positions_ja = ['教授', '名誉教授', '客員教授', '特任教授', '主席研究員', '統括']
+    senior_positions_en = ['professor', 'emeritus', 'director', 'principal', 'chief']
+    
+    # 職位チェック
+    for pos in young_positions_ja:
+        if pos in job_ja or pos in job_title_ja:
+            # シニアポジションでないことを確認
+            is_senior = any(sp in job_ja or sp in job_title_ja for sp in senior_positions_ja)
+            if not is_senior:
+                reasons.append(f"職位: {pos}")
+                break
+    
+    for pos in young_positions_en:
+        if pos in job_en or pos in job_title_en:
+            # シニアポジションでないことを確認
+            is_senior = any(sp in job_en or sp in job_title_en for sp in senior_positions_en)
+            if not is_senior and 'full professor' not in job_en.lower():
+                reasons.append(f"職位(英): {pos}")
+                break
+    
+    # 第2段階：プロフィールキーワードによる判定
+    profile_ja = (researcher_data.get('profile_ja', '') or '').lower()
+    
+    # 若手研究者を示すキーワード
+    young_keywords = [
+        '若手', '新進気鋭', 'early career', '博士課程', '博士取得',
+        '学位取得', 'キャリア初期', '研究員として', '採用され',
+        '着任', '博士号取得', 'ph.d.取得', '学振', 'jsps',
+        '育志賞', '若手研究者賞', '奨励賞'
+    ]
+    
+    for keyword in young_keywords:
+        if keyword in profile_ja:
+            reasons.append(f"キーワード: {keyword}")
+            break
+    
+    # 第3段階：年次情報からの推定
+    current_year = datetime.now().year
+    
+    # 博士号取得年の抽出
+    phd_patterns = [
+        r'(\d{4})年.*?博士.*?取得',
+        r'(\d{4})年.*?ph\.?d\.?',
+        r'博士.*?(\d{4})年',
+        r'ph\.?d\.?.*?(\d{4})',
+        r'(\d{4})年.*?学位',
+        r'(\d{4})年.*?博士課程.*?修了'
+    ]
+    
+    for pattern in phd_patterns:
+        match = re.search(pattern, profile_ja)
+        if match:
+            year = int(match.group(1))
+            years_since = current_year - year
+            if 0 <= years_since <= 15:  # 博士取得後15年以内
+                reasons.append(f"博士取得: {year}年（{years_since}年前）")
+                break
+    
+    # 最初の論文発表年からの推定
+    paper_title = researcher_data.get('paper_title_ja_first', '')
+    paper_year_match = re.search(r'\[(\d{4})\]', paper_title) or re.search(r'(\d{4})年', paper_title)
+    if paper_year_match:
+        first_paper_year = int(paper_year_match.group(1))
+        years_active = current_year - first_paper_year
+        if 0 <= years_active <= 10:  # 研究活動開始から10年以内
+            reasons.append(f"研究開始: {first_paper_year}年（{years_active}年前）")
+    
+    # 年齢に関する直接的な記述
+    age_patterns = [
+        r'(\d{2})歳',
+        r'(\d{4})年生まれ',
+        r'(\d{4})年.*?誕生'
+    ]
+    
+    for pattern in age_patterns:
+        match = re.search(pattern, profile_ja)
+        if match:
+            if '歳' in pattern:
+                age = int(match.group(1))
+                if 25 <= age <= 45:  # 若手研究者の年齢範囲
+                    reasons.append(f"年齢: {age}歳")
+            else:
+                birth_year = int(match.group(1))
+                age = current_year - birth_year
+                if 25 <= age <= 45:
+                    reasons.append(f"生年: {birth_year}年（{age}歳）")
+            break
+    
+    # 総合判定
+    is_young = len(reasons) > 0
+    
+    # 特別な除外条件の確認
+    exclusion_keywords = ['退職', '名誉', '元教授', '元所長', '顧問', '理事長', '学長', '総長']
+    for keyword in exclusion_keywords:
+        if keyword in profile_ja or keyword in job_ja or keyword in job_title_ja:
+            is_young = False
+            reasons = [f"除外条件: {keyword}"]
+            break
+    
+    return is_young, reasons
 
 async def perform_real_search(request) -> Dict[str, Any]:
     """
@@ -255,6 +389,11 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                             if col != 'distance':
                                 result[col] = row[col]
                     
+                    # 若手研究者判定
+                    is_young, young_reasons = is_young_researcher(result)
+                    result["is_young_researcher"] = is_young
+                    result["young_researcher_reasons"] = young_reasons
+                    
                     results.append(result)
                 
                 logger.info(f"✅ セマンティック検索完了: {len(results)}件")
@@ -296,6 +435,10 @@ async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: s
             name_en,
             main_affiliation_name_ja,
             main_affiliation_name_en,
+            main_affiliation_job_ja,
+            main_affiliation_job_title_ja,
+            main_affiliation_job_en,
+            main_affiliation_job_title_en,
             research_keywords_ja,
             research_fields_ja,
             profile_ja,
@@ -335,6 +478,10 @@ async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: s
                     "name_en": row.name_en,
                     "main_affiliation_name_ja": row.main_affiliation_name_ja,
                     "main_affiliation_name_en": row.main_affiliation_name_en,
+                    "main_affiliation_job_ja": row.main_affiliation_job_ja,
+                    "main_affiliation_job_title_ja": row.main_affiliation_job_title_ja,
+                    "main_affiliation_job_en": row.main_affiliation_job_en,
+                    "main_affiliation_job_title_en": row.main_affiliation_job_title_en,
                     "research_keywords_ja": row.research_keywords_ja,
                     "research_fields_ja": row.research_fields_ja,
                     "profile_ja": row.profile_ja,
@@ -388,6 +535,11 @@ async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: s
             result = candidate["data"].copy()
             result["distance"] = 1.0 - similarity  # 距離 = 1 - 類似度
             result["similarity"] = similarity
+            
+            # 若手研究者判定
+            is_young, young_reasons = is_young_researcher(result)
+            result["is_young_researcher"] = is_young
+            result["young_researcher_reasons"] = young_reasons
             
             results_with_similarity.append(result)
         
@@ -479,6 +631,10 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
             name_en,
             main_affiliation_name_ja,
             main_affiliation_name_en,
+            main_affiliation_job_ja,
+            main_affiliation_job_title_ja,
+            main_affiliation_job_en,
+            main_affiliation_job_title_en,
             research_keywords_ja,
             research_fields_ja,
             profile_ja,
@@ -497,11 +653,16 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
         results = []
         
         for row in query_job:
-            result = {
+            # 基本データを収集
+            researcher_data = {
                 "name_ja": row.name_ja,
                 "name_en": row.name_en,
                 "main_affiliation_name_ja": row.main_affiliation_name_ja,
                 "main_affiliation_name_en": row.main_affiliation_name_en,
+                "main_affiliation_job_ja": row.main_affiliation_job_ja,
+                "main_affiliation_job_title_ja": row.main_affiliation_job_title_ja,
+                "main_affiliation_job_en": row.main_affiliation_job_en,
+                "main_affiliation_job_title_en": row.main_affiliation_job_title_en,
                 "research_keywords_ja": row.research_keywords_ja,
                 "research_fields_ja": row.research_fields_ja,
                 "profile_ja": row.profile_ja,
@@ -510,7 +671,13 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
                 "researchmap_url": row.researchmap_url,
                 "relevance_score": float(row.relevance_score) if row.relevance_score else None
             }
-            results.append(result)
+            
+            # 若手研究者判定
+            is_young, young_reasons = is_young_researcher(researcher_data)
+            researcher_data["is_young_researcher"] = is_young
+            researcher_data["young_researcher_reasons"] = young_reasons
+            
+            results.append(researcher_data)
         
         logger.info(f"✅ キーワード検索完了: {len(results)}件")
         return results

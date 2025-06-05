@@ -388,7 +388,9 @@ class UniversalResearchEvaluator:
                 "profile": evaluation.researcher_data.get('profile_ja', ''),
                 "paper_title": evaluation.researcher_data.get('paper_title_ja_first', ''),
                 "project_title": evaluation.researcher_data.get('project_title_ja_first', ''),
-                "url": evaluation.researcher_data.get('researchmap_url', '')
+                "url": evaluation.researcher_data.get('researchmap_url', ''),
+                "is_young_researcher": evaluation.researcher_data.get('is_young_researcher', False),
+                "young_researcher_reasons": evaluation.researcher_data.get('young_researcher_reasons', [])
             }
             
             # 詳細スコア（内部評価モードの場合のみ）
