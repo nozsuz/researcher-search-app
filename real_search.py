@@ -32,7 +32,38 @@ def is_young_researcher(researcher_data: Dict[str, Any]) -> Tuple[bool, List[str
     name = researcher_data.get('name_ja', 'Unknown')
     logger.debug(f"🔍 若手研究者判定開始: {name}")
     
-    # 第1段階：職位による判定
+    # 第2段階を先に実施：プロフィールキーワードによる判定
+    profile_ja = (researcher_data.get('profile_ja', '') or '').lower()
+    
+    # プロフィール内の職位情報を優先的にチェック
+    profile_positions = [
+        '特任研究員', '特任講師', '特任助教', '助教', '准教授', 
+        '博士研究員', 'ポスドク', '研究員', '助手', '講師',
+        '博士後期課程', '博士課程', 'ポストドクトラル',
+        '日本学術振興会特別研究員', 'jsps特別研究員', '特別研究員',
+        '博士学生', '大学院生', '医員'
+    ]
+    
+    # 現在の職位を確認するためのより幅広いパターン
+    current_position_patterns = [
+        r'\d{4}年\s*-\s*(.+)',  # "2023年- 特任助教"
+        r'\d{4}年\s*～\s*(.+)',  # "2023年～ 特任助教"
+        r'\d{4}年\s*から\s*(.+)',  # "2023年から 特任助教"
+        r'現在\s*[：:]?\s*(.+)',  # "現在：特任助教"
+    ]
+    
+    for pattern in current_position_patterns:
+        match = re.search(pattern, profile_ja)
+        if match:
+            position_text = match.group(1).lower()
+            for pos in profile_positions:
+                if pos in position_text:
+                    reasons.append(f"現職(プロフィール): {pos}")
+                    break
+            if reasons:
+                break
+    
+    # 第1段階：職位カラムによる判定（データがある場合のみ）
     job_ja = (researcher_data.get('main_affiliation_job_ja', '') or '').lower()
     job_title_ja = (researcher_data.get('main_affiliation_job_title_ja', '') or '').lower()
     job_en = (researcher_data.get('main_affiliation_job_en', '') or '').lower()
@@ -74,8 +105,7 @@ def is_young_researcher(researcher_data: Dict[str, Any]) -> Tuple[bool, List[str
                 reasons.append(f"職位(英): {pos}")
                 break
     
-    # 第2段階：プロフィールキーワードによる判定
-    profile_ja = (researcher_data.get('profile_ja', '') or '').lower()
+    # 第2段階：プロフィールキーワードによる追加判定
     
     # 若手研究者を示すキーワード
     young_keywords = [
@@ -159,11 +189,16 @@ def is_young_researcher(researcher_data: Dict[str, Any]) -> Tuple[bool, List[str
                     reasons.append(f"生年: {birth_year}年（{age}歳）")
             break
     
-    # プロフィール内の職位情報もチェック（プロフィールに職位が記載されている場合）
-    profile_positions = ['特任研究員', '特任講師', '特任助教']
-    for pos in profile_positions:
-        if pos in profile_ja:
-            reasons.append(f"職位(プロフィール): {pos}")
+    # プロフィール内の年次パターンを使った現職判定
+    current_year = datetime.now().year
+    for i in range(current_year - 5, current_year + 1):  # 過去5年から現在まで
+        year_pattern = f"{i}年-|〜{i}年|{i}年～"
+        if re.search(year_pattern, profile_ja):
+            # その年以降の職位を確認
+            for pos in profile_positions:
+                if pos in profile_ja:
+                    reasons.append(f"現職(プロフィール): {pos} ({i}年～)")
+                    break
             break
     
     # 総合判定
@@ -371,21 +406,7 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         # 2. VECTOR_SEARCH関数を使用してセマンティック検索
         sql_query_semantic = f"""
         SELECT
-          distance,
-          base.name_ja,
-          base.name_en,
-          base.main_affiliation_name_ja,
-          base.main_affiliation_name_en,
-          base.main_affiliation_job_ja,
-          base.main_affiliation_job_title_ja,
-          base.main_affiliation_job_en,
-          base.main_affiliation_job_title_en,
-          base.research_keywords_ja,
-          base.research_fields_ja,
-          base.profile_ja,
-          base.paper_title_ja_first,
-          base.project_title_ja_first,
-          base.researchmap_url
+          *
         FROM
           VECTOR_SEARCH(
             (SELECT * FROM `apt-rope-217206.researcher_data.rd_250524`
@@ -416,40 +437,56 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                 # ネスト構造を展開
                 results = []
                 
+                # DataFrameのカラム名を確認
+                logger.info(f"📊 DataFrame columns: {list(df.columns)}")
+                
                 for idx, row in df.iterrows():
                     result = {}
                     
-                    # distance は直接コピー
-                    result['distance'] = row.get('distance')
+                    # 各カラムをチェックしてデータを取得
+                    for col in df.columns:
+                        value = row[col]
+                        
+                        # distanceカラムはそのままコピー
+                        if col == 'distance':
+                            result['distance'] = value
+                        
+                        # baseカラムが存在する場合
+                        elif col == 'base' and isinstance(value, dict):
+                            # base内のすべてのキーをトップレベルにコピー
+                            for key, val in value.items():
+                                result[key] = val
+                        
+                        # ネストされたカラム名の場合（例： base.name_ja）
+                        elif '.' in col:
+                            # ドットの後の部分をキー名として使用
+                            key_name = col.split('.')[-1]
+                            result[key_name] = value
+                        
+                        # 通常のカラム
+                        else:
+                            result[col] = value
                     
-                    # base カラムから実際のデータを抽出
-                    base_data = row.get('base', {})
-                    if isinstance(base_data, dict):
-                        # base内のすべてのキーをトップレベルにコピー
-                        for key, value in base_data.items():
-                            result[key] = value
-                    else:
-                        # baseがネストされていない場合は、直接カラムから取得
-                        for col in df.columns:
-                            if col != 'distance':
-                                result[col] = row[col]
-                    
+                    # デバッグログ：最初の結果のみ
+                    if idx == 0:
+                        logger.info(f"🔍 セマンティック検索結果の確認:")
+                        logger.info(f"  - result keys: {list(result.keys())}")
+                        logger.info(f"  - name_ja: {result.get('name_ja', 'NOT FOUND')}")
                     # 若手研究者判定
                     is_young, young_reasons = is_young_researcher(result)
                     result["is_young_researcher"] = is_young
                     result["young_researcher_reasons"] = young_reasons
                     
                     # 特定の研究者のデバッグ情報
-                    if '小松' in result.get('name_ja', ''):
-                        logger.info(f"🔍 小松氏のデータ: ")
-                        logger.info(f"  - main_affiliation_job_ja: {result.get('main_affiliation_job_ja')}")
-                        logger.info(f"  - main_affiliation_job_title_ja: {result.get('main_affiliation_job_title_ja')}")
+                    if '後藤' in result.get('name_ja', '') or '小松' in result.get('name_ja', ''):
+                        logger.info(f"🔍 セマンティック検索 - {result.get('name_ja')}氏のデータ: ")
+                        logger.info(f"  - main_affiliation_job_ja: {result.get('main_affiliation_job_ja', 'NULL/MISSING')}")
+                        logger.info(f"  - main_affiliation_job_title_ja: {result.get('main_affiliation_job_title_ja', 'NULL/MISSING')}")
                         logger.info(f"  - is_young_researcher: {is_young}")
                         logger.info(f"  - young_researcher_reasons: {young_reasons}")
-                        logger.info(f"  - profile_ja[:200]: {str(result.get('profile_ja', ''))[:200]}")
+                        logger.info(f"  - profile_ja[:300]: {str(result.get('profile_ja', ''))[:300]}")
                     
                     results.append(result)
-                
                 logger.info(f"✅ セマンティック検索完了: {len(results)}件")
                 if results:
                     logger.info(f"📊 最小距離: {results[0]['distance']:.4f}")
@@ -732,13 +769,17 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
             researcher_data["young_researcher_reasons"] = young_reasons
             
             # 特定の研究者のデバッグ情報
-            if '小松' in researcher_data.get('name_ja', ''):
-                logger.info(f"🔍 キーワード検索 - 小松氏のデータ: ")
-                logger.info(f"  - main_affiliation_job_ja: {researcher_data.get('main_affiliation_job_ja')}")
-                logger.info(f"  - main_affiliation_job_title_ja: {researcher_data.get('main_affiliation_job_title_ja')}")
+            if '後藤' in researcher_data.get('name_ja', '') or '小松' in researcher_data.get('name_ja', ''):
+                logger.info(f"🔍 検索 - {researcher_data.get('name_ja')}氏のデータ: ")
+                logger.info(f"  - main_affiliation_job_ja: {researcher_data.get('main_affiliation_job_ja', 'NULL/MISSING')}")
+                logger.info(f"  - main_affiliation_job_title_ja: {researcher_data.get('main_affiliation_job_title_ja', 'NULL/MISSING')}")
                 logger.info(f"  - is_young_researcher: {is_young}")
                 logger.info(f"  - young_researcher_reasons: {young_reasons}")
-                logger.info(f"  - profile_ja[:200]: {str(researcher_data.get('profile_ja', ''))[:200]}")
+                logger.info(f"  - profile_ja[:300]: {str(researcher_data.get('profile_ja', ''))[:300]}")
+                logger.info(f"  - 全フィールド: {list(researcher_data.keys())}")
+                # 職位カラムの存在を確認
+                if 'main_affiliation_job_ja' not in researcher_data:
+                    logger.warning(f"  ⚠️ main_affiliation_job_ja カラムが存在しません！")
             
             results.append(researcher_data)
         
