@@ -57,6 +57,7 @@ class SearchRequest(BaseModel):
     max_results: int = 5
     use_llm_expansion: bool = False
     use_llm_summary: bool = False
+    young_researcher_filter: bool = False
 
 class ResearcherResult(BaseModel):
     name_ja: Optional[str] = None

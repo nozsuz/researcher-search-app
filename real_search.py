@@ -231,6 +231,8 @@ async def perform_real_search(request) -> Dict[str, Any]:
         use_internal_evaluation = False
         # AI要約モードの判定
         use_ai_summary = request.use_llm_summary
+        # 若手研究者フィルタリング
+        young_researcher_filter = getattr(request, 'young_researcher_filter', False)
         logger.info(f"📊 評価モード: 標準検索")
         logger.info(f"📊 AI要約: {'ON' if use_ai_summary else 'OFF'}")
         
@@ -289,6 +291,20 @@ async def perform_real_search(request) -> Dict[str, Any]:
             results = await keyword_search(bq_client, search_query, request.max_results)
         
         logger.info(f"📊 検索結果: {len(results)}件")
+        
+        # 若手研究者フィルタリング
+        if young_researcher_filter and results:
+            logger.info(f"🌟 若手研究者フィルタリングを実行")
+            filtered_results = []
+            for result in results:
+                if result.get('is_young_researcher', False):
+                    filtered_results.append(result)
+                    logger.info(f"  ✅ {result.get('name_ja', 'Unknown')}: {result.get('young_researcher_reasons', [])}")
+                else:
+                    logger.debug(f"  ❌ {result.get('name_ja', 'Unknown')}: 若手研究者ではない")
+            
+            logger.info(f"🌟 フィルタリング結果: {len(results)}件 → {len(filtered_results)}件")
+            results = filtered_results
         
         # 評価システムによる処理（AI関連性分析を統合）
         if use_internal_evaluation and results:
