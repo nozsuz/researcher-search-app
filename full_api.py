@@ -64,6 +64,10 @@ class ResearcherResult(BaseModel):
     name_en: Optional[str] = None
     main_affiliation_name_ja: Optional[str] = None
     main_affiliation_name_en: Optional[str] = None
+    main_affiliation_job_ja: Optional[str] = None
+    main_affiliation_job_title_ja: Optional[str] = None
+    main_affiliation_job_en: Optional[str] = None
+    main_affiliation_job_title_en: Optional[str] = None
     research_keywords_ja: Optional[str] = None
     research_fields_ja: Optional[str] = None
     profile_ja: Optional[str] = None
@@ -73,6 +77,8 @@ class ResearcherResult(BaseModel):
     relevance_score: Optional[float] = None
     distance: Optional[float] = None
     llm_summary: Optional[str] = None
+    is_young_researcher: Optional[bool] = None
+    young_researcher_reasons: Optional[List[str]] = None
 
 class SearchResponse(BaseModel):
     status: str
@@ -374,6 +380,15 @@ async def search_researchers(request: SearchRequest):
         
         if result["status"] == "success":
             logger.info(f"✅ 実際の検索成功: {len(result['results'])}件")
+            
+            # デバッグ：最初の結果の若手研究者フィールドを確認
+            if result['results'] and len(result['results']) > 0:
+                first_result = result['results'][0]
+                logger.info(f"🔍 API返却前の最初の結果:")
+                logger.info(f"  - name_ja: {first_result.get('name_ja', 'NOT FOUND')}")
+                logger.info(f"  - is_young_researcher: {first_result.get('is_young_researcher', 'NOT FOUND')}")
+                logger.info(f"  - young_researcher_reasons: {first_result.get('young_researcher_reasons', 'NOT FOUND')}")
+            
             return SearchResponse(**result)
         else:
             logger.warning(f"⚠️ 実際の検索失敗、モックにフォールバック: {result.get('error_message')}")
@@ -424,6 +439,11 @@ async def search_researchers(request: SearchRequest):
         if request.use_llm_summary:
             for result in mock_results:
                 result["llm_summary"] = f"この研究者は「{request.query}」に関して深い専門知識を有しており、関連する研究プロジェクトで顕著な成果を上げています。"
+        
+        # モックデータにも若手研究者情報を追加
+        for i, result in enumerate(mock_results):
+            result["is_young_researcher"] = i % 2 == 0  # モックでは偶数番目を若手とする
+            result["young_researcher_reasons"] = ["モックデータ"] if result["is_young_researcher"] else []
     
     execution_time = time.time() - start_time
     

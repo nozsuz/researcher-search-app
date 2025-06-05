@@ -372,7 +372,16 @@ async def perform_real_search(request) -> Dict[str, Any]:
         else:
             logger.info("🏷️ 拡張情報なし")
         
-        return {
+        # 結果返却前の最終確認
+        if results and len(results) > 0:
+            logger.info(f"🔍 最終結果返却前のデータ確認:")
+            first_result = results[0]
+            logger.info(f"  - 最初の結果のname: {first_result.get('name_ja', 'N/A')}")
+            logger.info(f"  - is_young_researcher: {first_result.get('is_young_researcher', 'MISSING')}")
+            logger.info(f"  - young_researcher_reasons: {first_result.get('young_researcher_reasons', 'MISSING')}")
+            logger.info(f"  - 結果のキー: {list(first_result.keys())}")
+        
+        response_data = {
             "status": "success",
             "query": request.query,
             "method": request.method,
@@ -383,6 +392,10 @@ async def perform_real_search(request) -> Dict[str, Any]:
             "executed_query_info": executed_query_info,
             "expanded_info": expanded_info  # 拡張情報を追加
         }
+        
+        logger.info(f"📦 APIレスポンスデータのキー: {list(response_data.keys())}")
+        
+        return response_data
         
     except Exception as e:
         logger.error(f"❌ 実際の検索でエラー: {e}")
@@ -488,10 +501,16 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                         logger.info(f"🔍 セマンティック検索結果の確認:")
                         logger.info(f"  - result keys: {list(result.keys())}")
                         logger.info(f"  - name_ja: {result.get('name_ja', 'NOT FOUND')}")
+                    
                     # 若手研究者判定
                     is_young, young_reasons = is_young_researcher(result)
                     result["is_young_researcher"] = is_young
                     result["young_researcher_reasons"] = young_reasons
+                    
+                    # デバッグ：若手研究者フィールドが追加されたか確認
+                    if idx == 0:
+                        logger.info(f"  - is_young_researcher: {result.get('is_young_researcher', 'NOT FOUND')}")
+                        logger.info(f"  - young_researcher_reasons: {result.get('young_researcher_reasons', 'NOT FOUND')}")
                     
                     # 特定の研究者のデバッグ情報
                     if '後藤' in result.get('name_ja', '') or '小松' in result.get('name_ja', ''):
@@ -800,6 +819,16 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
             results.append(researcher_data)
         
         logger.info(f"✅ キーワード検索完了: {len(results)}件")
+        
+        # デバッグ：最初の結果の若手研究者フィールドを確認
+        if results and len(results) > 0:
+            first_result = results[0]
+            logger.info(f"🔍 キーワード検索結果の最初のデータ:")
+            logger.info(f"  - name_ja: {first_result.get('name_ja', 'N/A')}")
+            logger.info(f"  - is_young_researcher: {first_result.get('is_young_researcher', 'MISSING')}")
+            logger.info(f"  - young_researcher_reasons: {first_result.get('young_researcher_reasons', 'MISSING')}")
+            logger.info(f"  - キーリスト: {list(first_result.keys())}")
+        
         return results
         
     except Exception as e:
