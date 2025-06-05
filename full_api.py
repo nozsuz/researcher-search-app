@@ -6,6 +6,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import json
 from pydantic import BaseModel
 import pandas as pd
 import os
@@ -363,7 +364,7 @@ async def test_real_search():
             "error_details": str(e)
         }
 
-@app.post("/api/search", response_model=SearchResponse)
+@app.post("/api/search")
 async def search_researchers(request: SearchRequest):
     """
     研究者検索APIエンドポイント（実際の検索 + フォールバック）
@@ -389,27 +390,17 @@ async def search_researchers(request: SearchRequest):
                 logger.info(f"  - is_young_researcher: {first_result.get('is_young_researcher', 'NOT FOUND')}")
                 logger.info(f"  - young_researcher_reasons: {first_result.get('young_researcher_reasons', 'NOT FOUND')}")
             
-            # SearchResponseを作成する前に、結果をResearcherResultオブジェクトに変換
-            response = SearchResponse(
-                status=result["status"],
-                query=result["query"],
-                method=result["method"],
-                results=[ResearcherResult(**r) for r in result["results"]],
-                total=result["total"],
-                execution_time=result["execution_time"],
-                executed_query_info=result.get("executed_query_info"),
-                expanded_info=result.get("expanded_info")
-            )
+            # JSONResponseを使用して明示的に返す
+            logger.info(f"📦 JSONResponseで返します")
             
-            # デバッグ：SearchResponse作成後の確認
-            if response.results and len(response.results) > 0:
-                first_response_result = response.results[0]
-                logger.info(f"📦 SearchResponse作成後の最初の結果:")
-                logger.info(f"  - name_ja: {first_response_result.name_ja}")
-                logger.info(f"  - is_young_researcher: {first_response_result.is_young_researcher}")
-                logger.info(f"  - young_researcher_reasons: {first_response_result.young_researcher_reasons}")
+            # デバッグ：JSONシリアライズテスト
+            try:
+                json_str = json.dumps(result, ensure_ascii=False)
+                logger.info(f"📝 JSONシリアライズ成功")
+            except Exception as e:
+                logger.error(f"❌ JSONシリアライズエラー: {e}")
             
-            return response
+            return JSONResponse(content=result)
         else:
             logger.warning(f"⚠️ 実際の検索失敗、モックにフォールバック: {result.get('error_message')}")
             
@@ -475,20 +466,21 @@ async def search_researchers(request: SearchRequest):
         executed_query_info += ", AI要約: ON"
     executed_query_info += ")"
     
-    response = SearchResponse(
-        status="success",
-        query=request.query,
-        method=request.method,
-        results=[ResearcherResult(**result) for result in mock_results],
-        total=len(mock_results),
-        execution_time=execution_time,
-        executed_query_info=executed_query_info
-    )
+    # 辞書形式で直接返す
+    response = {
+        "status": "success",
+        "query": request.query,
+        "method": request.method,
+        "results": mock_results,
+        "total": len(mock_results),
+        "execution_time": execution_time,
+        "executed_query_info": executed_query_info
+    }
     
     logger.info(f"✅ モック検索完了: {len(mock_results)}件, {execution_time:.2f}秒")
     return response
 
-@app.get("/api/search", response_model=SearchResponse)
+@app.get("/api/search")
 async def search_researchers_get(
     query: str = Query(..., description="検索クエリ"),
     method: str = Query("semantic", description="検索方法 (semantic/keyword)"),

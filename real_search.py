@@ -522,7 +522,10 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                         logger.info(f"  - profile_ja[:300]: {str(result.get('profile_ja', ''))[:300]}")
                     
                     results.append(result)
-                logger.info(f"✅ セマンティック検索完了: {len(results)}件")
+                
+                # デバッグ：若手研究者情報が追加された結果の数をカウント
+                young_researcher_count = sum(1 for r in results if r.get('is_young_researcher', False))
+                logger.info(f"✅ セマンティック検索完了: {len(results)}件 (若手研究者: {young_researcher_count}名)")
                 if results:
                     logger.info(f"📊 最小距離: {results[0]['distance']:.4f}")
                 
