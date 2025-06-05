@@ -28,6 +28,10 @@ def is_young_researcher(researcher_data: Dict[str, Any]) -> Tuple[bool, List[str
     """
     reasons = []
     
+    # デバッグ用ログ
+    name = researcher_data.get('name_ja', 'Unknown')
+    logger.debug(f"🔍 若手研究者判定開始: {name}")
+    
     # 第1段階：職位による判定
     job_ja = (researcher_data.get('main_affiliation_job_ja', '') or '').lower()
     job_title_ja = (researcher_data.get('main_affiliation_job_title_ja', '') or '').lower()
@@ -80,6 +84,23 @@ def is_young_researcher(researcher_data: Dict[str, Any]) -> Tuple[bool, List[str
         '着任', '博士号取得', 'ph.d.取得', '学振', 'jsps',
         '育志賞', '若手研究者賞', '奨励賞'
     ]
+    
+    # 平成生まれのパターン（若手指標）
+    heisei_pattern = r'平成元年生まれ|平成\d+年生まれ'
+    if re.search(heisei_pattern, profile_ja):
+        match = re.search(heisei_pattern, profile_ja)
+        birth_text = match.group(0)
+        # 平成元年 = 1989年
+        if '平成元年' in birth_text:
+            birth_year = 1989
+        else:
+            heisei_year = int(re.search(r'\d+', birth_text).group(0))
+            birth_year = 1988 + heisei_year
+        
+        current_year = datetime.now().year
+        age = current_year - birth_year
+        if age <= 45:  # 45歳以下
+            reasons.append(f"生年: {birth_text}（{age}歳）")
     
     for keyword in young_keywords:
         if keyword in profile_ja:
@@ -138,6 +159,13 @@ def is_young_researcher(researcher_data: Dict[str, Any]) -> Tuple[bool, List[str
                     reasons.append(f"生年: {birth_year}年（{age}歳）")
             break
     
+    # プロフィール内の職位情報もチェック（プロフィールに職位が記載されている場合）
+    profile_positions = ['特任研究員', '特任講師', '特任助教']
+    for pos in profile_positions:
+        if pos in profile_ja:
+            reasons.append(f"職位(プロフィール): {pos}")
+            break
+    
     # 総合判定
     is_young = len(reasons) > 0
     
@@ -148,6 +176,9 @@ def is_young_researcher(researcher_data: Dict[str, Any]) -> Tuple[bool, List[str
             is_young = False
             reasons = [f"除外条件: {keyword}"]
             break
+    
+    # デバッグ用ログ
+    logger.debug(f"🎯 若手判定結果: {name} - {is_young} - {reasons}")
     
     return is_young, reasons
 
@@ -340,7 +371,21 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         # 2. VECTOR_SEARCH関数を使用してセマンティック検索
         sql_query_semantic = f"""
         SELECT
-          *
+          distance,
+          base.name_ja,
+          base.name_en,
+          base.main_affiliation_name_ja,
+          base.main_affiliation_name_en,
+          base.main_affiliation_job_ja,
+          base.main_affiliation_job_title_ja,
+          base.main_affiliation_job_en,
+          base.main_affiliation_job_title_en,
+          base.research_keywords_ja,
+          base.research_fields_ja,
+          base.profile_ja,
+          base.paper_title_ja_first,
+          base.project_title_ja_first,
+          base.researchmap_url
         FROM
           VECTOR_SEARCH(
             (SELECT * FROM `apt-rope-217206.researcher_data.rd_250524`
@@ -393,6 +438,15 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                     is_young, young_reasons = is_young_researcher(result)
                     result["is_young_researcher"] = is_young
                     result["young_researcher_reasons"] = young_reasons
+                    
+                    # 特定の研究者のデバッグ情報
+                    if '小松' in result.get('name_ja', ''):
+                        logger.info(f"🔍 小松氏のデータ: ")
+                        logger.info(f"  - main_affiliation_job_ja: {result.get('main_affiliation_job_ja')}")
+                        logger.info(f"  - main_affiliation_job_title_ja: {result.get('main_affiliation_job_title_ja')}")
+                        logger.info(f"  - is_young_researcher: {is_young}")
+                        logger.info(f"  - young_researcher_reasons: {young_reasons}")
+                        logger.info(f"  - profile_ja[:200]: {str(result.get('profile_ja', ''))[:200]}")
                     
                     results.append(result)
                 
@@ -676,6 +730,15 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
             is_young, young_reasons = is_young_researcher(researcher_data)
             researcher_data["is_young_researcher"] = is_young
             researcher_data["young_researcher_reasons"] = young_reasons
+            
+            # 特定の研究者のデバッグ情報
+            if '小松' in researcher_data.get('name_ja', ''):
+                logger.info(f"🔍 キーワード検索 - 小松氏のデータ: ")
+                logger.info(f"  - main_affiliation_job_ja: {researcher_data.get('main_affiliation_job_ja')}")
+                logger.info(f"  - main_affiliation_job_title_ja: {researcher_data.get('main_affiliation_job_title_ja')}")
+                logger.info(f"  - is_young_researcher: {is_young}")
+                logger.info(f"  - young_researcher_reasons: {young_reasons}")
+                logger.info(f"  - profile_ja[:200]: {str(researcher_data.get('profile_ja', ''))[:200]}")
             
             results.append(researcher_data)
         
