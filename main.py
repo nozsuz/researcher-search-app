@@ -55,6 +55,7 @@ class SearchRequest(BaseModel):
     use_llm_summary: bool = False
     use_internal_evaluation: bool = False  # 内部評価モードのフラグ
     young_researcher_filter: bool = False  # 若手研究者フィルタ
+    university_filter: Optional[List[str]] = None  # 大学名フィルター
 
 class ResearcherResult(BaseModel):
     name_ja: Optional[str] = None
@@ -440,6 +441,8 @@ async def search_researchers(request: SearchRequest):
     start_time = time.time()
     
     logger.info(f"🔍 検索リクエスト受信: {request.query}, method: {request.method}")
+    if request.university_filter:
+        logger.info(f"🏫 大学フィルター: {request.university_filter}")
     
     # 実際の検索を試行し、失敗した場合はモックにフォールバック
     try:
@@ -549,6 +552,64 @@ async def search_researchers(request: SearchRequest):
     logger.info(f"📊 レスポンスexpanded_info: {response.expanded_info}")
     return response
 
+@app.get("/api/universities")
+async def get_universities():
+    """
+    登録されている大学名とその研究者数を取得
+    """
+    try:
+        from gcp_auth import get_bigquery_client
+        bq_client = get_bigquery_client()
+        
+        if bq_client:
+            # BigQueryから大学名と研究者数を取得
+            query = f"""
+            SELECT 
+                main_affiliation_name_ja as university_name,
+                COUNT(*) as researcher_count
+            FROM `{BIGQUERY_TABLE}`
+            WHERE main_affiliation_name_ja IS NOT NULL
+            GROUP BY main_affiliation_name_ja
+            ORDER BY researcher_count DESC
+            """
+            
+            query_job = bq_client.query(query)
+            universities = []
+            
+            for row in query_job:
+                universities.append({
+                    "name": row.university_name,
+                    "count": row.researcher_count
+                })
+            
+            return {
+                "status": "success",
+                "total_universities": len(universities),
+                "universities": universities
+            }
+        else:
+            # モックデータ
+            return {
+                "status": "success",
+                "total_universities": 5,
+                "universities": [
+                    {"name": "東京大学", "count": 5234},
+                    {"name": "京都大学", "count": 4123},
+                    {"name": "大阪大学", "count": 3456},
+                    {"name": "東北大学", "count": 2890},
+                    {"name": "名古屋大学", "count": 2345}
+                ]
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ 大学リスト取得エラー: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "total_universities": 0,
+            "universities": []
+        }
+
 @app.get("/api/search", response_model=SearchResponse)
 async def search_researchers_get(
     query: str = Query(..., description="検索クエリ"),
@@ -556,7 +617,8 @@ async def search_researchers_get(
     max_results: int = Query(5, ge=1, le=20, description="最大結果数"),
     use_llm_expansion: bool = Query(False, description="LLMキーワード拡張"),
     use_llm_summary: bool = Query(False, description="LLM要約生成"),
-    use_internal_evaluation: bool = Query(False, description="内部評価モードを使用")
+    use_internal_evaluation: bool = Query(False, description="内部評価モードを使用"),
+    universities: Optional[str] = Query(None, description="大学名フィルター（カンマ区切り）")
 ):
     """
     GET版の研究者検索エンドポイント（テスト用）
@@ -569,6 +631,11 @@ async def search_researchers_get(
         use_llm_summary=use_llm_summary,
         use_internal_evaluation=use_internal_evaluation
     )
+    
+    # 大学フィルターをリクエストに追加
+    if universities:
+        request.university_filter = universities.split(",")
+    
     return await search_researchers(request)
 
 @app.post("/api/analyze-researcher", response_model=ResearcherAnalysisResponse)

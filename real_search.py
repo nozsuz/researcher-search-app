@@ -233,8 +233,12 @@ async def perform_real_search(request) -> Dict[str, Any]:
         use_ai_summary = request.use_llm_summary
         # 若手研究者フィルタリング
         young_researcher_filter = getattr(request, 'young_researcher_filter', False)
+        # 大学フィルタリング
+        university_filter = getattr(request, 'university_filter', None)
         logger.info(f"📊 評価モード: 標準検索")
         logger.info(f"📊 AI要約: {'ON' if use_ai_summary else 'OFF'}")
+        if university_filter:
+            logger.info(f"🏫 大学フィルター: {university_filter}")
         
         # GCPクライアントを取得
         from gcp_auth import get_bigquery_client, is_vertex_ai_ready
@@ -286,9 +290,9 @@ async def perform_real_search(request) -> Dict[str, Any]:
         
         # 検索方法に応じて実行
         if request.method == "semantic" and vertex_ai_available:
-            results = await semantic_search_with_embedding(bq_client, search_query, request.max_results)
+            results = await semantic_search_with_embedding(bq_client, search_query, request.max_results, university_filter)
         else:  # keyword
-            results = await keyword_search(bq_client, search_query, request.max_results)
+            results = await keyword_search(bq_client, search_query, request.max_results, university_filter)
         
         logger.info(f"📊 検索結果: {len(results)}件")
         
@@ -406,7 +410,7 @@ async def perform_real_search(request) -> Dict[str, Any]:
         }
 
 # 以下、既存の関数はそのまま維持
-async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str, max_results: int) -> List[Dict]:
+async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str, max_results: int, university_filter: Optional[List[str]] = None) -> List[Dict]:
     """
     実際のセマンティック検索（VECTOR_SEARCH関数を使用）
     """
@@ -432,6 +436,14 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         # クエリベクトルを文字列形式に変換
         query_embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
         
+        # 大学フィルター条件の構築
+        university_condition = ""
+        if university_filter and len(university_filter) > 0:
+            # SQLインジェクション対策
+            safe_universities = [univ.replace("'", "''") for univ in university_filter]
+            university_list = ",".join([f"'{univ}'" for univ in safe_universities])
+            university_condition = f" AND main_affiliation_name_ja IN ({university_list})"
+        
         # 2. VECTOR_SEARCH関数を使用してセマンティック検索
         sql_query_semantic = f"""
         SELECT
@@ -439,7 +451,7 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         FROM
           VECTOR_SEARCH(
             (SELECT * FROM `apt-rope-217206.researcher_data.rd_250524`
-             WHERE ARRAY_LENGTH(embedding) > 0),
+             WHERE ARRAY_LENGTH(embedding) > 0{university_condition}),
             'embedding',
             (SELECT {query_embedding_str} AS query_vector),
             top_k => @top_k_param,
@@ -541,15 +553,15 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
             
             # VECTOR_SEARCH関数が使えない場合は、リアルタイムベクトル化にフォールバック
             logger.info("🔄 リアルタイムベクトル化検索にフォールバック")
-            return await semantic_search_realtime_fallback(bq_client, query, query_embedding, max_results)
+            return await semantic_search_realtime_fallback(bq_client, query, query_embedding, max_results, university_filter)
         
     except Exception as e:
         logger.error(f"❌ セマンティック検索エラー: {e}")
         # エラー時はキーワード検索にフォールバック
         logger.info("🔄 キーワード検索にフォールバック")
-        return await keyword_search(bq_client, query, max_results)
+        return await keyword_search(bq_client, query, max_results, university_filter)
 
-async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: str, query_embedding: List[float], max_results: int) -> List[Dict]:
+async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: str, query_embedding: List[float], max_results: int, university_filter: Optional[List[str]] = None) -> List[Dict]:
     """
     リアルタイムベクトル化によるセマンティック検索（フォールバック）
     """
@@ -558,6 +570,14 @@ async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: s
         
         # データベースから研究者データを取得（テキスト形式）
         first_keyword = query.split()[0] if query.split() else query
+        
+        # 大学フィルター条件の構築
+        university_condition = ""
+        if university_filter and len(university_filter) > 0:
+            safe_universities = [univ.replace("'", "''") for univ in university_filter]
+            university_list = ",".join([f"'{univ}'" for univ in safe_universities])
+            university_condition = f" AND main_affiliation_name_ja IN ({university_list})"
+        
         search_sql = f"""
         SELECT 
             name_ja,
@@ -584,7 +604,7 @@ async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: s
             LOWER(research_keywords_ja) LIKE LOWER('%{first_keyword}%') OR
             LOWER(research_fields_ja) LIKE LOWER('%{first_keyword}%') OR
             LOWER(profile_ja) LIKE LOWER('%{first_keyword}%')
-        )
+        ){university_condition}
         LIMIT {max_results * 5}  -- より多くの候補を取得してから類似度計算
         """
         
@@ -710,7 +730,7 @@ def calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
         logger.warning(f"⚠️ コサイン類似度計算エラー: {e}")
         return 0.0
 
-async def keyword_search(bq_client: bigquery.Client, query: str, max_results: int) -> List[Dict]:
+async def keyword_search(bq_client: bigquery.Client, query: str, max_results: int, university_filter: Optional[List[str]] = None) -> List[Dict]:
     """
     キーワード検索（全文検索、拡張キーワード対応）
     """
@@ -754,6 +774,13 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
         
         total_relevance_score = " + ".join(relevance_scores) if relevance_scores else "0"
         
+        # 大学フィルター条件の構築
+        university_condition = ""
+        if university_filter and len(university_filter) > 0:
+            safe_universities = [univ.replace("'", "''") for univ in university_filter]
+            university_list = ",".join([f"'{univ}'" for univ in safe_universities])
+            university_condition = f" AND main_affiliation_name_ja IN ({university_list})"
+        
         search_sql = f"""
         SELECT 
             name_ja,
@@ -773,7 +800,7 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
             -- 関連度スコア（重み付けされたマッチの合計）
             ({total_relevance_score}) as relevance_score
         FROM `apt-rope-217206.researcher_data.rd_250524`
-        WHERE {where_clause}
+        WHERE ({where_clause}){university_condition}
         ORDER BY relevance_score DESC, name_ja
         LIMIT {max_results}
         """
