@@ -565,12 +565,76 @@ async def get_universities():
             # BigQueryから大学名と研究者数を取得
             # 同一大学の表記揺れを考慮した集計
             query = f"""
+            WITH normalized_universities AS (
+                SELECT DISTINCT
+                    name_ja,
+                    main_affiliation_name_ja,
+                    -- 大学名の正規化（改良版）
+                    CASE 
+                        -- 特別なケースの処理（混同を避けるため）
+                        WHEN main_affiliation_name_ja IN ('南九州大学', '西九州大学', '北九州大学') THEN main_affiliation_name_ja
+                        
+                        -- 慶應/慶応の表記揺れ対応
+                        WHEN main_affiliation_name_ja LIKE '%慶應義塾大学%' OR main_affiliation_name_ja LIKE '%慶応義塾大学%' THEN '慶應義塾大学'
+                        
+                        -- 汎用的な大学名正規化
+                        WHEN main_affiliation_name_ja LIKE '%大学%' THEN
+                            CASE
+                                -- パターン1: 「○○大学大学院」→「○○大学」
+                                WHEN main_affiliation_name_ja LIKE '%大学大学院%' THEN
+                                    SUBSTRING(main_affiliation_name_ja, 1, STRPOS(main_affiliation_name_ja, '大学大学院') + 2)
+                                
+                                -- パターン2: 「○○大学病院」→「○○大学」
+                                WHEN main_affiliation_name_ja LIKE '%大学病院%' THEN
+                                    SUBSTRING(main_affiliation_name_ja, 1, STRPOS(main_affiliation_name_ja, '大学病院') + 2)
+                                
+                                -- パターン3: 「○○大学附属病院」→「○○大学」
+                                WHEN main_affiliation_name_ja LIKE '%大学附属病院%' THEN
+                                    SUBSTRING(main_affiliation_name_ja, 1, STRPOS(main_affiliation_name_ja, '大学附属病院') + 2)
+                                
+                                -- パターン4: 「○○大学医学部附属病院」→「○○大学」
+                                WHEN main_affiliation_name_ja LIKE '%大学医学部附属病院%' THEN
+                                    SUBSTRING(main_affiliation_name_ja, 1, STRPOS(main_affiliation_name_ja, '大学医学部附属病院') + 2)
+                                
+                                -- パターン5: 学部・研究科パターン
+                                WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'大学[医工理農法経文教薬歯看]学部') THEN
+                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
+                                
+                                WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'大学[医工理農法経文教薬歯]学系研究科') THEN
+                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
+                                
+                                WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'大学.*研究科') THEN
+                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
+                                
+                                -- パターン6: 「○○大学研究所」「○○大学センター」など
+                                WHEN main_affiliation_name_ja LIKE '%大学研究所%' OR 
+                                     main_affiliation_name_ja LIKE '%大学センター%' OR
+                                     main_affiliation_name_ja LIKE '%大学機構%' THEN
+                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
+                                
+                                -- パターン7: 大学院大学（独立した大学院）はそのまま保持
+                                WHEN main_affiliation_name_ja LIKE '%大学院大学%' THEN
+                                    main_affiliation_name_ja
+                                
+                                -- その他の「大学院○○」パターン（○○大学大学院以外）
+                                WHEN main_affiliation_name_ja LIKE '大学院%' AND NOT main_affiliation_name_ja LIKE '%大学大学院%' THEN
+                                    main_affiliation_name_ja
+                                
+                                -- その他の大学関連はそのまま
+                                ELSE main_affiliation_name_ja
+                            END
+                        
+                        -- 大学以外の機関はそのまま
+                        ELSE main_affiliation_name_ja
+                    END as normalized_university_name
+                FROM `{BIGQUERY_TABLE}`
+                WHERE main_affiliation_name_ja IS NOT NULL
+            )
             SELECT 
-                main_affiliation_name_ja as university_name,
+                normalized_university_name as university_name,
                 COUNT(DISTINCT name_ja) as researcher_count
-            FROM `{BIGQUERY_TABLE}`
-            WHERE main_affiliation_name_ja IS NOT NULL
-            GROUP BY main_affiliation_name_ja
+            FROM normalized_universities
+            GROUP BY normalized_university_name
             ORDER BY researcher_count DESC
             """
             
