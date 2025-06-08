@@ -12,6 +12,7 @@ def normalize_university_name(university_name: str) -> str:
     """
     大学名を正規化する（シンプル版・修正版）
     ○○大学+{任意の文字} → ○○大学 に統合
+    「国立大学法人」等の法人格を除去
     """
     if not university_name:
         return ""
@@ -19,6 +20,12 @@ def normalize_university_name(university_name: str) -> str:
     # 全角・半角スペース除去
     normalized = university_name.strip()
     normalized = re.sub(r'[\s　]+', '', normalized)
+    
+    # 法人格の除去
+    normalized = re.sub(r'^国立大学法人', '', normalized)
+    normalized = re.sub(r'^公立大学法人', '', normalized) 
+    normalized = re.sub(r'^学校法人', '', normalized)
+    normalized = re.sub(r'^独立行政法人', '', normalized)
     
     # 大学名の基本パターンを抽出
     # "○○大学" の部分を正しく抽出する
@@ -41,6 +48,7 @@ def get_normalized_university_stats_query(table_name: str) -> str:
     """
     シンプル版の大学統計クエリ（修正版）
     REGEXP_EXTRACTを使用して○○大学の部分のみを正しく抽出
+    「国立大学法人」等の法人格を除去
     """
     return f"""
     WITH normalized_universities AS (
@@ -50,7 +58,19 @@ def get_normalized_university_stats_query(table_name: str) -> str:
           WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'東京工業大学') THEN '東京科学大学'
           WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'東京医科歯科大学') THEN '東京科学大学'
           ELSE REGEXP_EXTRACT(
-            REGEXP_REPLACE(main_affiliation_name_ja, r'[\\s　]+', ''),
+            REGEXP_REPLACE(
+              REGEXP_REPLACE(
+                REGEXP_REPLACE(
+                  REGEXP_REPLACE(
+                    REGEXP_REPLACE(main_affiliation_name_ja, r'[\\s　]+', ''),
+                    r'^国立大学法人', ''
+                  ),
+                  r'^公立大学法人', ''
+                ),
+                r'^学校法人', ''
+              ),
+              r'^独立行政法人', ''
+            ),
             r'(.+?大学)'
           )
         END as university_name,
@@ -110,6 +130,10 @@ def test_normalization():
         "慶應義塾大学",
         "東京理科大学",
         "国立大学法人東京大学",
+        "国立大学法人京都大学",
+        "国立大学法人大阪大学大学院",
+        "公立大学法人大阪市立大学",
+        "学校法人慶應義塾大学",
         "東海国立大学機構名古屋大学"
     ]
     
@@ -120,9 +144,10 @@ def test_normalization():
         print(f"{name:<40} → {normalized}")
     
     print("\n" + "=" * 60)
-    print("正規表現の説明:")
-    print("修正前: [^大学]*大学  → 「大学」以外の文字 + 「大学」（間違い）")
-    print("修正後: .+?大学       → 任意の文字（非貪欲） + 「大学」（正しい）")
+    print("正規化ルール:")
+    print("1. 法人格除去: 国立大学法人○○大学 → ○○大学")
+    print("2. 基本抽出: ○○大学+{任意文字} → ○○大学")
+    print("3. 統合処理: 東京工業大学・東京医科歯科大学 → 東京科学大学")
 
 if __name__ == "__main__":
     test_normalization()

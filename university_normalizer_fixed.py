@@ -1,5 +1,5 @@
 """
-大学名正規化システム - 修正版（シンプル実装）
+大学名正規化システム - 修正版（「国立大学法人」対応）
 """
 
 import re
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 def normalize_university_name(university_name: str) -> str:
     """
-    大学名を正規化する（シンプル版）
+    大学名を正規化する（「国立大学法人」対応版）
     """
     if not university_name:
         return ""
@@ -21,6 +21,12 @@ def normalize_university_name(university_name: str) -> str:
     
     # 基本的な正規化パターン
     patterns = [
+        # 法人格の除去（最初に処理）
+        (r'^国立大学法人', ''),
+        (r'^公立大学法人', ''),
+        (r'^学校法人', ''),
+        (r'^独立行政法人', ''),
+        
         # 病院系
         (r'附属病院$', ''),
         (r'病院$', ''),
@@ -58,7 +64,7 @@ def normalize_university_name(university_name: str) -> str:
 
 def get_university_normalization_sql(column_name: str) -> str:
     """
-    SQLでの大学正規化（シンプル版）
+    SQLでの大学正規化（「国立大学法人」対応版）
     """
     return f"""
     REGEXP_REPLACE(
@@ -71,14 +77,26 @@ def get_university_normalization_sql(column_name: str) -> str:
                   REGEXP_REPLACE(
                     REGEXP_REPLACE(
                       REGEXP_REPLACE(
-                        CASE 
-                          WHEN {column_name} LIKE '%東京工業大学%' THEN '東京科学大学'
-                          WHEN {column_name} LIKE '%東京医科歯科大学%' THEN '東京科学大学'
-                          ELSE {column_name}
-                        END,
-                        r'　+', ''
+                        REGEXP_REPLACE(
+                          REGEXP_REPLACE(
+                            REGEXP_REPLACE(
+                              REGEXP_REPLACE(
+                                CASE 
+                                  WHEN {column_name} LIKE '%東京工業大学%' THEN '東京科学大学'
+                                  WHEN {column_name} LIKE '%東京医科歯科大学%' THEN '東京科学大学'
+                                  ELSE {column_name}
+                                END,
+                                r'　+', ''
+                              ),
+                              r'\\s+', ''
+                            ),
+                            r'^国立大学法人', ''
+                          ),
+                          r'^公立大学法人', ''
+                        ),
+                        r'^学校法人', ''
                       ),
-                      r'\\s+', ''
+                      r'^独立行政法人', ''
                     ),
                     r'附属病院$', ''
                   ),
