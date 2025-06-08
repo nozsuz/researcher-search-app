@@ -246,24 +246,30 @@ async def get_universities():
         try:
             from gcp_auth import get_bigquery_client, get_gcp_status
             
-            # 大学名統合クエリ（国立大学法人対応版）
+            # 大学名統合クエリ（国立大学法人対応版 - シンプルパターンマッチ版）
             def get_simple_university_query(table_name: str) -> str:
                 return f"""
                 SELECT 
                     CASE
-                        -- 国立大学法人東海国立大学機構関連の統合
-                        WHEN main_affiliation_name_ja REGEXP r'国立大学法人.*?東海国立大学機構.*?名古屋大学' THEN '名古屋大学'
-                        WHEN main_affiliation_name_ja REGEXP r'東海国立大学機構.*?名古屋大学' THEN '名古屋大学'
-                        WHEN main_affiliation_name_ja REGEXP r'国立大学法人.*?東海国立大学機構' AND main_affiliation_name_ja NOT LIKE '%名古屋大学%' THEN '東海国立大学機構'
-                        WHEN main_affiliation_name_ja REGEXP r'東海国立大学機構' AND main_affiliation_name_ja NOT LIKE '%名古屋大学%' THEN '東海国立大学機構'
+                        -- 東海国立大学機構関連の特別処理
+                        WHEN main_affiliation_name_ja LIKE '%東海国立大学機構%' AND main_affiliation_name_ja LIKE '%名古屋大学%' THEN '名古屋大学'
+                        WHEN main_affiliation_name_ja LIKE '%東海国立大学機構%' AND main_affiliation_name_ja NOT LIKE '%名古屋大学%' THEN '東海国立大学機構'
                         
-                        -- 一般的な国立大学法人の処理
-                        WHEN main_affiliation_name_ja REGEXP r'^国立大学法人\s*(.+?大学)' THEN 
-                            REGEXP_EXTRACT(main_affiliation_name_ja, r'^国立大学法人\s*(.+?大学)')
+                        -- 国立大学法人の除去（既知のパターン）
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人東京大学%' THEN '東京大学'
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人京都大学%' THEN '京都大学'
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人大阪大学%' THEN '大阪大学'
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人東北大学%' THEN '東北大学'
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人九州大学%' THEN '九州大学'
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人北海道大学%' THEN '北海道大学'
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人筑波大学%' THEN '筑波大学'
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人名古屋大学%' THEN '名古屋大学'
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人広島大学%' THEN '広島大学'
+                        WHEN main_affiliation_name_ja LIKE '国立大学法人神戸大学%' THEN '神戸大学'
                         
-                        -- 通常の大学名抽出
-                        WHEN main_affiliation_name_ja REGEXP r'(.+?大学)' THEN 
-                            REGEXP_EXTRACT(main_affiliation_name_ja, r'(.+?大学)')
+                        -- 一般的な大学名抽出（最初の「○○大学」部分を取得）
+                        WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'[^\s]*大学') THEN 
+                            REGEXP_EXTRACT(main_affiliation_name_ja, r'([^\s]*大学)')
                         
                         ELSE main_affiliation_name_ja
                     END as university_name,
@@ -276,6 +282,7 @@ async def get_universities():
                 HAVING COUNT(DISTINCT name_ja) >= 5
                   AND university_name IS NOT NULL
                   AND university_name != ''
+                  AND university_name != '大学'
                 ORDER BY researcher_count DESC
                 LIMIT 100
                 """
