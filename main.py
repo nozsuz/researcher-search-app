@@ -569,62 +569,66 @@ async def get_universities():
                 SELECT DISTINCT
                     name_ja,
                     main_affiliation_name_ja,
-                    -- 大学名の正規化（確実な方法）
+                    -- 大学名の正規化（明示的なマッピング）
                     CASE 
-                        -- 特別なケースの処理
-                        WHEN main_affiliation_name_ja IN ('南九州大学', '西九州大学', '北九州大学') THEN main_affiliation_name_ja
+                        -- 明示的に指定された組織を本体大学にマッピング
+                        WHEN main_affiliation_name_ja = '東京大学大学院' THEN '東京大学'
+                        WHEN main_affiliation_name_ja = '北海道大学病院' THEN '北海道大学'
+                        WHEN main_affiliation_name_ja = '東京大学医学部附属病院' THEN '東京大学'
+                        WHEN main_affiliation_name_ja = '東北大学病院' THEN '東北大学'
+                        WHEN main_affiliation_name_ja = '京都大学大学院' THEN '京都大学'
+                        WHEN main_affiliation_name_ja = '大阪大学大学院医学系研究科' THEN '大阪大学'
+                        WHEN main_affiliation_name_ja = '北海道大学大学院' THEN '北海道大学'
+                        WHEN main_affiliation_name_ja = '九州大学病院' THEN '九州大学'
+                        WHEN main_affiliation_name_ja = '東京大学大学院医学系研究科' THEN '東京大学'
                         
-                        -- 東京大学系
-                        WHEN main_affiliation_name_ja LIKE '%東京大学%' THEN '東京大学'
-                        -- 京都大学系  
-                        WHEN main_affiliation_name_ja LIKE '%京都大学%' THEN '京都大学'
-                        -- 大阪大学系
-                        WHEN main_affiliation_name_ja LIKE '%大阪大学%' THEN '大阪大学'
-                        -- 北海道大学系
-                        WHEN main_affiliation_name_ja LIKE '%北海道大学%' THEN '北海道大学'
-                        -- 東北大学系
-                        WHEN main_affiliation_name_ja LIKE '%東北大学%' THEN '東北大学'
-                        -- 九州大学系（他の九州系大学を除外）
-                        WHEN main_affiliation_name_ja LIKE '%九州大学%' 
+                        -- さらに一般的なパターンも追加
+                        -- 東京大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '東京大学%' THEN '東京大学'
+                        -- 京都大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '京都大学%' THEN '京都大学'
+                        -- 大阪大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '大阪大学%' THEN '大阪大学'
+                        -- 北海道大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '北海道大学%' THEN '北海道大学'
+                        -- 東北大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '東北大学%' THEN '東北大学'
+                        -- 九州大学系のすべての組織（他の九州系大学を除外）
+                        WHEN main_affiliation_name_ja LIKE '九州大学%' 
                              AND main_affiliation_name_ja NOT LIKE '%南九州大学%' 
                              AND main_affiliation_name_ja NOT LIKE '%西九州大学%' 
                              AND main_affiliation_name_ja NOT LIKE '%北九州大学%' THEN '九州大学'
-                        -- 名古屋大学系
-                        WHEN main_affiliation_name_ja LIKE '%名古屋大学%' THEN '名古屋大学'
-                        -- 筑波大学系
-                        WHEN main_affiliation_name_ja LIKE '%筑波大学%' THEN '筑波大学'
-                        -- 東京工業大学系
-                        WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京工業大学'
-                        -- 東京科学大学系（東工大と東京医科歯科大の統合）
-                        WHEN main_affiliation_name_ja LIKE '%東京科学大学%' THEN '東京科学大学'
-                        -- 東京医科歯科大学系
-                        WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京医科歯科大学'
-                        -- 慶應義塾大学系
-                        WHEN main_affiliation_name_ja LIKE '%慶應義塾大学%' OR main_affiliation_name_ja LIKE '%慶応義塾大学%' THEN '慶應義塾大学'
+                        -- 名古屋大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '名古屋大学%' THEN '名古屋大学'
+                        -- 筑波大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '筑波大学%' THEN '筑波大学'
+                        -- 東京工業大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '東京工業大学%' THEN '東京工業大学'
+                        -- 東京科学大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '東京科学大学%' THEN '東京科学大学'
+                        -- 東京医科歯科大学系のすべての組織
+                        WHEN main_affiliation_name_ja LIKE '東京医科歯科大学%' THEN '東京医科歯科大学'
+                        
+                        -- 特別なケース（混同を避けるため）
+                        WHEN main_affiliation_name_ja IN ('南九州大学', '西九州大学', '北九州大学') THEN main_affiliation_name_ja
+                        WHEN main_affiliation_name_ja LIKE '東大阪大学%' THEN '東大阪大学'
+                        
+                        -- 慶應義塾大学系（表記揺れ対応）
+                        WHEN main_affiliation_name_ja LIKE '慶應義塾大学%' OR main_affiliation_name_ja LIKE '慶応義塾大学%' THEN '慶應義塾大学'
                         -- 早稲田大学系
-                        WHEN main_affiliation_name_ja LIKE '%早稲田大学%' THEN '早稲田大学'
-                        -- 神戸大学系
-                        WHEN main_affiliation_name_ja LIKE '%神戸大学%' THEN '神戸大学'
-                        -- 広島大学系
-                        WHEN main_affiliation_name_ja LIKE '%広島大学%' THEN '広島大学'
-                        -- 岡山大学系
-                        WHEN main_affiliation_name_ja LIKE '%岡山大学%' THEN '岡山大学'
-                        -- 金沢大学系
-                        WHEN main_affiliation_name_ja LIKE '%金沢大学%' THEN '金沢大学'
-                        -- 新潟大学系
-                        WHEN main_affiliation_name_ja LIKE '%新潟大学%' THEN '新潟大学'
-                        -- 千葉大学系
-                        WHEN main_affiliation_name_ja LIKE '%千葉大学%' THEN '千葉大学'
-                        -- 横浜国立大学系
-                        WHEN main_affiliation_name_ja LIKE '%横浜国立大学%' THEN '横浜国立大学'
-                        -- 信州大学系
-                        WHEN main_affiliation_name_ja LIKE '%信州大学%' THEN '信州大学'
-                        -- 山形大学系
-                        WHEN main_affiliation_name_ja LIKE '%山形大学%' THEN '山形大学'
-                        -- 群馬大学系
-                        WHEN main_affiliation_name_ja LIKE '%群馬大学%' THEN '群馬大学'
-                        -- 【追加】東大阪大学系（誤って東京大学に含めないように）
-                        WHEN main_affiliation_name_ja LIKE '%東大阪大学%' THEN '東大阪大学'
+                        WHEN main_affiliation_name_ja LIKE '早稲田大学%' THEN '早稲田大学'
+                        
+                        -- その他の主要大学
+                        WHEN main_affiliation_name_ja LIKE '神戸大学%' THEN '神戸大学'
+                        WHEN main_affiliation_name_ja LIKE '広島大学%' THEN '広島大学'
+                        WHEN main_affiliation_name_ja LIKE '岡山大学%' THEN '岡山大学'
+                        WHEN main_affiliation_name_ja LIKE '金沢大学%' THEN '金沢大学'
+                        WHEN main_affiliation_name_ja LIKE '新潟大学%' THEN '新潟大学'
+                        WHEN main_affiliation_name_ja LIKE '千葉大学%' THEN '千葉大学'
+                        WHEN main_affiliation_name_ja LIKE '横浜国立大学%' THEN '横浜国立大学'
+                        WHEN main_affiliation_name_ja LIKE '信州大学%' THEN '信州大学'
+                        WHEN main_affiliation_name_ja LIKE '山形大学%' THEN '山形大学'
+                        WHEN main_affiliation_name_ja LIKE '群馬大学%' THEN '群馬大学'
                         
                         -- その他はそのまま
                         ELSE main_affiliation_name_ja
