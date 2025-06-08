@@ -1,7 +1,6 @@
 """
-大学名正規化システム
-明示的なマッピングではなく、ルールベースで動的に正規化を行う
-新規登録された大学にも自動的に適用される
+大学名正規化システム（完全修正版）
+確実で安全な正規化ロジックを実装
 """
 
 import re
@@ -13,79 +12,11 @@ logger = logging.getLogger(__name__)
 
 class UniversityNormalizer:
     """
-    大学名正規化クラス
-    ルールベースで動的に大学名を正規化し、新規登録にも対応
+    大学名正規化クラス（完全修正版）
+    確実で安全な正規化ルールを実装
     """
     
     def __init__(self):
-        # 正規化ルールパターン
-        self.normalization_patterns = [
-            # 大学院系の統合
-            (r'^(.+大学)大学院$', r'\1'),
-            (r'^(.+大学)大学院.+$', r'\1'),
-            
-            # 附属機関・病院の統合
-            (r'^(.+大学).+附属病院$', r'\1'),
-            (r'^(.+大学).+病院$', r'\1'),
-            (r'^(.+大学).+医学部附属病院$', r'\1'),
-            
-            # 研究科・学部の統合
-            (r'^(.+大学)大学院.+研究科$', r'\1'),
-            (r'^(.+大学).+研究科$', r'\1'),
-            (r'^(.+大学).+学部$', r'\1'),
-            (r'^(.+大学).+学院$', r'\1'),
-            
-            # 研究所・センターの統合
-            (r'^(.+大学).+研究所$', r'\1'),
-            (r'^(.+大学).+センター$', r'\1'),
-            (r'^(.+大学).+機構$', r'\1'),
-            (r'^(.+大学).+機関$', r'\1'),
-            (r'^(.+大学).+本部$', r'\1'),
-            
-            # 特定の部門・組織の統合
-            (r'^(.+大学).+科学研究院$', r'\1'),
-            (r'^(.+大学).+医学研究院$', r'\1'),
-            (r'^(.+大学).+工学研究院$', r'\1'),
-            (r'^(.+大学).+研究院$', r'\1'),
-            
-            # その他の附属組織
-            (r'^(.+大学).+博物館$', r'\1'),
-            (r'^(.+大学).+図書館$', r'\1'),
-            (r'^(.+大学).+事務局$', r'\1'),
-            
-            # 複数キャンパス・分校の統合
-            (r'^(.+大学).+キャンパス$', r'\1'),
-            (r'^(.+大学).+校$', r'\1'),
-            (r'^(.+大学).+分校$', r'\1'),
-            
-            # 法人格の除去
-            (r'^学校法人(.+大学)$', r'\1'),
-            (r'^国立大学法人(.+大学)$', r'\1'),
-            (r'^公立大学法人(.+大学)$', r'\1'),
-            (r'^私立(.+大学)$', r'\1'),
-            
-            # 空白・記号の統一
-            (r'\s+', ' '),  # 複数の空白を1つに
-            (r'　+', ''),   # 全角空白を除去
-        ]
-        
-        # 特別な統合ルール（名称変更など）
-        self.special_mappings = {
-            # 統合・名称変更された大学
-            '東京医科歯科大学': '東京科学大学',
-            '東京工業大学': '東京科学大学',
-            
-            # 略称の統一
-            '東大': '東京大学',
-            '京大': '京都大学',
-            '阪大': '大阪大学',
-            '東工大': '東京科学大学',
-            '一橋大': '一橋大学',
-            
-            # 旧称の統一
-            '帝国大学': '',  # 削除対象
-        }
-        
         # キャッシュ
         self._normalization_cache: Dict[str, str] = {}
     
@@ -110,20 +41,48 @@ class UniversityNormalizer:
         
         normalized = original_name
         
-        # 特別なマッピングを適用
-        for old_name, new_name in self.special_mappings.items():
+        # Step 1: 特別なマッピング（統合・名称変更）
+        special_mappings = {
+            '東京医科歯科大学': '東京科学大学',
+            '東京工業大学': '東京科学大学',
+        }
+        
+        for old_name, new_name in special_mappings.items():
             if old_name in normalized:
-                if new_name:  # 置換
-                    normalized = normalized.replace(old_name, new_name)
-                else:  # 削除
-                    normalized = normalized.replace(old_name, '')
+                normalized = normalized.replace(old_name, new_name)
         
-        # 正規化パターンを順次適用
-        for pattern, replacement in self.normalization_patterns:
-            normalized = re.sub(pattern, replacement, normalized)
+        # Step 2: 法人格の除去
+        normalized = re.sub(r'^学校法人(.+大学).*$', r'\1', normalized)
+        normalized = re.sub(r'^国立大学法人(.+大学).*$', r'\1', normalized)
+        normalized = re.sub(r'^公立大学法人(.+大学).*$', r'\1', normalized)
         
-        # 前後の空白を除去
+        # Step 3: 大学院の除去
+        normalized = re.sub(r'^(.+大学)大学院.*$', r'\1', normalized)
+        
+        # Step 4: 附属機関の除去（修正版）
+        normalized = re.sub(r'^(.+大学).+附属病院.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学)病院$', r'\1', normalized)  # 直接連結パターン
+        normalized = re.sub(r'^(.+大学).+研究所.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+センター.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+機構.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+学部.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+研究科.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+研究院.*$', r'\1', normalized)
+        
+        # Step 5: 空白の正規化
+        normalized = re.sub(r'\s+', ' ', normalized)
+        normalized = re.sub(r'　+', '', normalized)
         normalized = normalized.strip()
+        
+        # Step 6: 品質チェック
+        # 大学が含まれていない、重複文字がある、異常な長さの場合は元のデータを保持
+        if (not normalized or 
+            not '大学' in normalized or 
+            '学学' in normalized or 
+            '大大' in normalized or 
+            len(normalized) < 3 or 
+            len(normalized) > 50):
+            normalized = original_name
         
         # 結果をキャッシュ
         self._normalization_cache[original_name] = normalized
@@ -132,58 +91,10 @@ class UniversityNormalizer:
         
         return normalized
     
-    def get_university_groups(self, university_names: List[str]) -> Dict[str, List[str]]:
-        """
-        大学名リストを正規化してグループ化する
-        
-        Args:
-            university_names: 元の大学名リスト
-            
-        Returns:
-            正規化名をキーとした大学名グループ
-        """
-        groups = defaultdict(list)
-        
-        for name in university_names:
-            normalized = self.normalize_university_name(name)
-            if normalized:  # 空でない場合のみ追加
-                groups[normalized].append(name)
-        
-        return dict(groups)
-    
-    def generate_normalization_sql(self, source_column: str) -> str:
-        """
-        BigQuery用の正規化SQLを生成する
-        
-        Args:
-            source_column: 元の大学名カラム名
-            
-        Returns:
-            正規化用のSQL CASE文
-        """
-        sql_parts = ["CASE"]
-        
-        # 特別なマッピング
-        for old_name, new_name in self.special_mappings.items():
-            if new_name:  # 置換
-                sql_parts.append(f"WHEN {source_column} LIKE '%{old_name}%' THEN REPLACE({source_column}, '{old_name}', '{new_name}')")
-        
-        # 正規化パターン
-        current_column = source_column
-        for i, (pattern, replacement) in enumerate(self.normalization_patterns):
-            if pattern.startswith('^') and pattern.endswith('$'):
-                # 完全一致パターンの場合
-                regex_pattern = pattern[1:-1]  # ^ と $ を除去
-                sql_parts.append(f"WHEN REGEXP_CONTAINS({current_column}, r'{regex_pattern}') THEN REGEXP_REPLACE({current_column}, r'{pattern}', '{replacement}')")
-        
-        sql_parts.append(f"ELSE {source_column}")
-        sql_parts.append("END")
-        
-        return " ".join(sql_parts)
-    
     def get_normalized_university_stats_query(self, table_name: str) -> str:
         """
         正規化された大学名統計用のBigQueryクエリを生成
+        確実で安全なSQL
         
         Args:
             table_name: テーブル名
@@ -191,60 +102,127 @@ class UniversityNormalizer:
         Returns:
             正規化統計用SQLクエリ
         """
-        normalization_sql = self.generate_dynamic_normalization_sql("main_affiliation_name_ja")
         
         return f"""
-        WITH normalized_universities AS (
+        WITH university_normalization AS (
             SELECT 
                 name_ja,
                 main_affiliation_name_ja as original_university,
-                {normalization_sql} as normalized_university
+                CASE 
+                    -- 特別なマッピング（統合・名称変更された大学）
+                    WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
+                    WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
+                    
+                    -- 一般的な正規化処理
+                    ELSE 
+                        TRIM(
+                            REGEXP_REPLACE(
+                                REGEXP_REPLACE(
+                                    REGEXP_REPLACE(
+                                        REGEXP_REPLACE(
+                                            REGEXP_REPLACE(
+                                                REGEXP_REPLACE(
+                                                    REGEXP_REPLACE(
+                                                        REGEXP_REPLACE(
+                                                            REGEXP_REPLACE(
+                                                                REGEXP_REPLACE(
+                                                                    REGEXP_REPLACE(
+                                                                        TRIM(main_affiliation_name_ja),
+                                                                        r'^学校法人(.+大学).*$', r'\\\\1'
+                                                                    ),
+                                                                    r'^国立大学法人(.+大学).*$', r'\\\\1'
+                                                                ),
+                                                                r'^公立大学法人(.+大学).*$', r'\\\\1'
+                                                            ),
+                                                            r'^(.+大学)大学院.*$', r'\\\\1'
+                                                        ),
+                                                        r'^(.+大学).+附属病院.*$', r'\\\\1'
+                                                    ),
+                                                    r'^(.+大学)病院$', r'\\\\1'
+                                                ),
+                                                r'^(.+大学).+研究所.*$', r'\\\\1'
+                                            ),
+                                            r'^(.+大学).+センター.*$', r'\\\\1'
+                                        ),
+                                        r'^(.+大学).+機構.*$', r'\\\\1'
+                                    ),
+                                    r'^(.+大学).+学部.*$', r'\\\\1'
+                                ),
+                                r'^(.+大学).+研究科.*$', r'\\\\1'
+                            )
+                        )
+                END as normalized_university
             FROM `{table_name}`
             WHERE main_affiliation_name_ja IS NOT NULL
+              AND main_affiliation_name_ja != ''
+              AND main_affiliation_name_ja LIKE '%大学%'
+              AND LENGTH(main_affiliation_name_ja) >= 3
+              AND LENGTH(main_affiliation_name_ja) <= 100  -- 異常に長い名前を除外
         )
         SELECT 
             normalized_university as university_name,
             COUNT(DISTINCT name_ja) as researcher_count,
-            ARRAY_AGG(DISTINCT original_university IGNORE NULLS) as original_names
-        FROM normalized_universities
-        WHERE normalized_university IS NOT NULL AND normalized_university != ''
+            ARRAY_AGG(DISTINCT original_university ORDER BY original_university LIMIT 10) as original_names
+        FROM university_normalization
+        WHERE normalized_university IS NOT NULL 
+          AND normalized_university != ''
+          AND normalized_university LIKE '%大学%'
+          AND LENGTH(normalized_university) >= 3
+          AND LENGTH(normalized_university) <= 50  -- 異常に長い名前を除外
+          AND NOT REGEXP_CONTAINS(normalized_university, r'学学|大大')  -- 重複文字を除外
         GROUP BY normalized_university
+        HAVING COUNT(DISTINCT name_ja) >= 5  -- 5名以上の研究者がいる大学のみ
         ORDER BY researcher_count DESC
         """
     
-    def generate_dynamic_normalization_sql(self, source_column: str) -> str:
+    def get_university_normalization_sql(self, source_column: str = "main_affiliation_name_ja") -> str:
         """
-        動的な正規化SQL（全パターンを適用）を生成
+        検索フィルタリング用の正規化SQLを生成
         
         Args:
             source_column: 元の大学名カラム名
             
         Returns:
-            動的正規化用のSQL
+            正規化用SQL
         """
-        sql = f"TRIM({source_column})"
         
-        # 特別なマッピングを適用
-        for old_name, new_name in self.special_mappings.items():
-            if new_name:  # 置換
-                sql = f"REPLACE({sql}, '{old_name}', '{new_name}')"
-            else:  # 削除
-                sql = f"REPLACE({sql}, '{old_name}', '')"
-        
-        # 正規化パターンを適用
-        for pattern, replacement in self.normalization_patterns:
-            # BigQuery用のREGEXP_REPLACEに変換
-            if '(.+大学)' in pattern:
-                # キャプチャグループを含むパターン
-                sql = f"REGEXP_REPLACE({sql}, r'{pattern}', r'{replacement}')"
-            elif pattern == r'\s+':
-                # 空白の正規化
-                sql = f"REGEXP_REPLACE({sql}, r'\\s+', ' ')"
-            elif pattern == r'　+':
-                # 全角空白の除去
-                sql = f"REGEXP_REPLACE({sql}, r'　+', '')"
-        
-        return f"TRIM({sql})"
+        return f"""
+        CASE 
+            -- 特別なマッピング
+            WHEN {source_column} LIKE '%東京医科歯科大学%' THEN '東京科学大学'
+            WHEN {source_column} LIKE '%東京工業大学%' THEN '東京科学大学'
+            
+            -- 一般的な正規化
+            ELSE 
+                TRIM(
+                    REGEXP_REPLACE(
+                        REGEXP_REPLACE(
+                            REGEXP_REPLACE(
+                                REGEXP_REPLACE(
+                                    REGEXP_REPLACE(
+                                        REGEXP_REPLACE(
+                                            REGEXP_REPLACE(
+                                                REGEXP_REPLACE(
+                                                    TRIM({source_column}),
+                                                    r'^学校法人(.+大学).*$', r'\\\\1'
+                                                ),
+                                                r'^国立大学法人(.+大学).*$', r'\\\\1'
+                                            ),
+                                            r'^(.+大学)大学院.*$', r'\\\\1'
+                                        ),
+                                        r'^(.+大学).+附属病院.*$', r'\\\\1'
+                                    ),
+                                    r'^(.+大学)病院$', r'\\\\1'
+                                ),
+                                r'^(.+大学).+研究所.*$', r'\\\\1'
+                            ),
+                            r'^(.+大学).+センター.*$', r'\\\\1'
+                        ),
+                        r'^(.+大学).+学部.*$', r'\\\\1'
+                    )
+                )
+        END
+        """
 
 # グローバルインスタンス
 normalizer = UniversityNormalizer()
@@ -263,7 +241,7 @@ def normalize_university_name(university_name: str) -> str:
 
 def get_university_normalization_sql(source_column: str = "main_affiliation_name_ja") -> str:
     """
-    BigQuery用の動的正規化SQLを取得
+    BigQuery用の正規化SQLを取得
     
     Args:
         source_column: 元の大学名カラム名
@@ -271,7 +249,7 @@ def get_university_normalization_sql(source_column: str = "main_affiliation_name
     Returns:
         正規化用SQL
     """
-    return normalizer.generate_dynamic_normalization_sql(source_column)
+    return normalizer.get_university_normalization_sql(source_column)
 
 def get_normalized_university_stats_query(table_name: str) -> str:
     """
@@ -296,16 +274,22 @@ def test_normalization():
         "京都大学大学院医学研究科",
         "大阪大学核物理研究センター",
         "東北大学金属材料研究所",
+        "九州大学病院",  # 重要なテストケース
         "学校法人慶應義塾大学",
         "国立大学法人筑波大学",
-        "東京科学大学大学院",  # 新しい大学名
-        "新設大学研究センター",  # 新規大学のテスト
+        "東京科学大学大学院",
+        "東京医科歯科大学",
+        "東京工業大学大学院",
+        # 異常ケース
+        "東京都大学学",
+        "大大阪大学学",
     ]
     
     print("大学名正規化テスト:")
     for name in test_cases:
         normalized = normalize_university_name(name)
-        print(f"  '{name}' → '{normalized}'")
+        status = "✅ 正規化" if name != normalized else "📝 保持"
+        print(f"  '{name}' → '{normalized}' ({status})")
 
 if __name__ == "__main__":
     test_normalization()
