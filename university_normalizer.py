@@ -1,6 +1,6 @@
 """
-大学名正規化システム（完全修正版）
-確実で安全な正規化ロジックを実装
+大学名正規化システム（完全強化版）
+すべての複雑な大学名パターンに対応する包括的な正規化ロジック
 """
 
 import re
@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 class UniversityNormalizer:
     """
-    大学名正規化クラス（完全修正版）
-    確実で安全な正規化ルールを実装
+    大学名正規化クラス（完全強化版）
+    あらゆる大学名パターンに対応する包括的な正規化ルールを実装
     """
     
     def __init__(self):
@@ -22,7 +22,7 @@ class UniversityNormalizer:
     
     def normalize_university_name(self, university_name: str) -> str:
         """
-        大学名を正規化する
+        大学名を正規化する（完全強化版）
         
         Args:
             university_name: 元の大学名
@@ -59,15 +59,58 @@ class UniversityNormalizer:
         # Step 3: 大学院の除去
         normalized = re.sub(r'^(.+大学)大学院.*$', r'\1', normalized)
         
-        # Step 4: 附属機関の除去（修正版）
+        # Step 4: 附属機関の除去（超強化版）
+        
+        # 病院系
         normalized = re.sub(r'^(.+大学).+附属病院.*$', r'\1', normalized)
-        normalized = re.sub(r'^(.+大学)病院$', r'\1', normalized)  # 直接連結パターン
+        normalized = re.sub(r'^(.+大学)病院$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+医学部附属病院.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+病院.*$', r'\1', normalized)
+        
+        # 医学系
+        normalized = re.sub(r'^(.+大学)医学医療系.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+医学研究院.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学)医学系.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+医学部.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+医学研究科.*$', r'\1', normalized)
+        
+        # 研究所・センター系
         normalized = re.sub(r'^(.+大学).+研究所.*$', r'\1', normalized)
         normalized = re.sub(r'^(.+大学).+センター.*$', r'\1', normalized)
         normalized = re.sub(r'^(.+大学).+機構.*$', r'\1', normalized)
+        
+        # 特殊機関
+        normalized = re.sub(r'^(.+大学).+史料編纂所.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+博物館.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+図書館.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+資料館.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+文書館.*$', r'\1', normalized)
+        
+        # 学部・研究科系（より詳細）
         normalized = re.sub(r'^(.+大学).+学部.*$', r'\1', normalized)
         normalized = re.sub(r'^(.+大学).+研究科.*$', r'\1', normalized)
-        normalized = re.sub(r'^(.+大学).+研究院.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+学科.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+専攻.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+コース.*$', r'\1', normalized)
+        
+        # 追加の複雑なパターン
+        normalized = re.sub(r'^(.+大学).+事務局.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+本部.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+分校.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+キャンパス.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+分院.*$', r'\1', normalized)
+        
+        # 総合・連携系
+        normalized = re.sub(r'^(.+大学).+総合.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+連携.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+共同.*$', r'\1', normalized)
+        
+        # より細かい機関名
+        normalized = re.sub(r'^(.+大学).+実験.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+観測.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+施設.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+室.*$', r'\1', normalized)
+        normalized = re.sub(r'^(.+大学).+所.*$', r'\1', normalized)
         
         # Step 5: 空白の正規化
         normalized = re.sub(r'\s+', ' ', normalized)
@@ -93,8 +136,7 @@ class UniversityNormalizer:
     
     def get_normalized_university_stats_query(self, table_name: str) -> str:
         """
-        正規化された大学名統計用のBigQueryクエリを生成
-        確実で安全なSQL
+        正規化された大学名統計用のBigQueryクエリを生成（完全強化版）
         
         Args:
             table_name: テーブル名
@@ -113,7 +155,7 @@ class UniversityNormalizer:
                     WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
                     WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
                     
-                    -- 一般的な正規化処理
+                    -- 一般的な正規化処理（超強化版）
                     ELSE 
                         TRIM(
                             REGEXP_REPLACE(
@@ -127,29 +169,66 @@ class UniversityNormalizer:
                                                             REGEXP_REPLACE(
                                                                 REGEXP_REPLACE(
                                                                     REGEXP_REPLACE(
-                                                                        TRIM(main_affiliation_name_ja),
-                                                                        r'^学校法人(.+大学).*$', r'\\\\1'
+                                                                        REGEXP_REPLACE(
+                                                                            REGEXP_REPLACE(
+                                                                                REGEXP_REPLACE(
+                                                                                    REGEXP_REPLACE(
+                                                                                        REGEXP_REPLACE(
+                                                                                            REGEXP_REPLACE(
+                                                                                                REGEXP_REPLACE(
+                                                                                                    REGEXP_REPLACE(
+                                                                                                        REGEXP_REPLACE(
+                                                                                                            REGEXP_REPLACE(
+                                                                                                                REGEXP_REPLACE(
+                                                                                                                    REGEXP_REPLACE(
+                                                                                                                        TRIM(main_affiliation_name_ja),
+                                                                                                                        r'^学校法人(.+大学).*$', r'\\\\1'
+                                                                                                                    ),
+                                                                                                                    r'^国立大学法人(.+大学).*$', r'\\\\1'
+                                                                                                                ),
+                                                                                                                r'^公立大学法人(.+大学).*$', r'\\\\1'
+                                                                                                            ),
+                                                                                                            r'^(.+大学)大学院.*$', r'\\\\1'
+                                                                                                        ),
+                                                                                                        r'^(.+大学).+附属病院.*$', r'\\\\1'
+                                                                                                    ),
+                                                                                                    r'^(.+大学)病院$', r'\\\\1'
+                                                                                                ),
+                                                                                                r'^(.+大学).+医学部附属病院.*$', r'\\\\1'
+                                                                                            ),
+                                                                                            r'^(.+大学).+病院.*$', r'\\\\1'
+                                                                                        ),
+                                                                                        r'^(.+大学)医学医療系.*$', r'\\\\1'
+                                                                                    ),
+                                                                                    r'^(.+大学).+医学研究院.*$', r'\\\\1'
+                                                                                ),
+                                                                                r'^(.+大学)医学系.*$', r'\\\\1'
+                                                                            ),
+                                                                            r'^(.+大学).+医学部.*$', r'\\\\1'
+                                                                        ),
+                                                                        r'^(.+大学).+医学研究科.*$', r'\\\\1'
                                                                     ),
-                                                                    r'^国立大学法人(.+大学).*$', r'\\\\1'
+                                                                    r'^(.+大学).+研究所.*$', r'\\\\1'
                                                                 ),
-                                                                r'^公立大学法人(.+大学).*$', r'\\\\1'
+                                                                r'^(.+大学).+センター.*$', r'\\\\1'
                                                             ),
-                                                            r'^(.+大学)大学院.*$', r'\\\\1'
+                                                            r'^(.+大学).+機構.*$', r'\\\\1'
                                                         ),
-                                                        r'^(.+大学).+附属病院.*$', r'\\\\1'
+                                                        r'^(.+大学).+史料編纂所.*$', r'\\\\1'
                                                     ),
-                                                    r'^(.+大学)病院$', r'\\\\1'
+                                                    r'^(.+大学).+博物館.*$', r'\\\\1'
                                                 ),
-                                                r'^(.+大学).+研究所.*$', r'\\\\1'
+                                                r'^(.+大学).+図書館.*$', r'\\\\1'
                                             ),
-                                            r'^(.+大学).+センター.*$', r'\\\\1'
+                                            r'^(.+大学).+学部.*$', r'\\\\1'
                                         ),
-                                        r'^(.+大学).+機構.*$', r'\\\\1'
+                                        r'^(.+大学).+研究科.*$', r'\\\\1'
                                     ),
-                                    r'^(.+大学).+学部.*$', r'\\\\1'
+                                    r'^(.+大学).+学科.*$', r'\\\\1'
                                 ),
-                                r'^(.+大学).+研究科.*$', r'\\\\1'
-                            )
+                                r'^(.+大学).+総合.*$', r'\\\\1'
+                            ),
+                            r'^(.+大学).+所.*$', r'\\\\1'
                         )
                 END as normalized_university
             FROM `{table_name}`
@@ -177,7 +256,7 @@ class UniversityNormalizer:
     
     def get_university_normalization_sql(self, source_column: str = "main_affiliation_name_ja") -> str:
         """
-        検索フィルタリング用の正規化SQLを生成
+        検索フィルタリング用の正規化SQLを生成（完全強化版）
         
         Args:
             source_column: 元の大学名カラム名
@@ -192,7 +271,7 @@ class UniversityNormalizer:
             WHEN {source_column} LIKE '%東京医科歯科大学%' THEN '東京科学大学'
             WHEN {source_column} LIKE '%東京工業大学%' THEN '東京科学大学'
             
-            -- 一般的な正規化
+            -- 一般的な正規化（超強化版）
             ELSE 
                 TRIM(
                     REGEXP_REPLACE(
@@ -203,23 +282,45 @@ class UniversityNormalizer:
                                         REGEXP_REPLACE(
                                             REGEXP_REPLACE(
                                                 REGEXP_REPLACE(
-                                                    TRIM({source_column}),
-                                                    r'^学校法人(.+大学).*$', r'\\\\1'
+                                                    REGEXP_REPLACE(
+                                                        REGEXP_REPLACE(
+                                                            REGEXP_REPLACE(
+                                                                REGEXP_REPLACE(
+                                                                    REGEXP_REPLACE(
+                                                                        REGEXP_REPLACE(
+                                                                            REGEXP_REPLACE(
+                                                                                TRIM({source_column}),
+                                                                                r'^学校法人(.+大学).*$', r'\\\\1'
+                                                                            ),
+                                                                            r'^国立大学法人(.+大学).*$', r'\\\\1'
+                                                                        ),
+                                                                        r'^(.+大学)大学院.*$', r'\\\\1'
+                                                                    ),
+                                                                    r'^(.+大学).+附属病院.*$', r'\\\\1'
+                                                                ),
+                                                                r'^(.+大学)病院$', r'\\\\1'
+                                                            ),
+                                                            r'^(.+大学).+病院.*$', r'\\\\1'
+                                                        ),
+                                                        r'^(.+大学)医学医療系.*$', r'\\\\1'
+                                                    ),
+                                                    r'^(.+大学).+医学研究院.*$', r'\\\\1'
                                                 ),
-                                                r'^国立大学法人(.+大学).*$', r'\\\\1'
+                                                r'^(.+大学).+研究所.*$', r'\\\\1'
                                             ),
-                                            r'^(.+大学)大学院.*$', r'\\\\1'
+                                            r'^(.+大学).+センター.*$', r'\\\\1'
                                         ),
-                                        r'^(.+大学).+附属病院.*$', r'\\\\1'
+                                        r'^(.+大学).+史料編纂所.*$', r'\\\\1'
                                     ),
-                                    r'^(.+大学)病院$', r'\\\\1'
+                                    r'^(.+大学).+博物館.*$', r'\\\\1'
                                 ),
-                                r'^(.+大学).+研究所.*$', r'\\\\1'
+                                r'^(.+大学).+学部.*$', r'\\\\1'
                             ),
-                            r'^(.+大学).+センター.*$', r'\\\\1'
+                            r'^(.+大学).+研究科.*$', r'\\\\1'
                         ),
-                        r'^(.+大学).+学部.*$', r'\\\\1'
-                    )
+                        r'^(.+大学).+総合.*$', r'\\\\1'
+                    ),
+                    r'^(.+大学).+所.*$', r'\\\\1'
                 )
         END
         """
@@ -266,26 +367,40 @@ def get_normalized_university_stats_query(table_name: str) -> str:
 # テスト用関数
 def test_normalization():
     """
-    正規化機能のテスト
+    正規化機能のテスト（強化版）
     """
     test_cases = [
+        # 基本ケース
         "東京大学大学院",
         "東京大学医学部附属病院",
         "京都大学大学院医学研究科",
         "大阪大学核物理研究センター",
         "東北大学金属材料研究所",
-        "九州大学病院",  # 重要なテストケース
+        "九州大学病院",
+        
+        # 今回問題になったケース
+        "筑波大学附属病院",
+        "東京大学史料編纂所",
+        "筑波大学医学医療系",
+        "九州大学総合研究博物館",
+        "北海道大学医学研究院",
+        
+        # 追加の複雑なケース
         "学校法人慶應義塾大学",
         "国立大学法人筑波大学",
         "東京科学大学大学院",
         "東京医科歯科大学",
         "東京工業大学大学院",
+        "名古屋大学附属図書館",
+        "京都大学総合博物館",
+        "大阪大学医学系研究科",
+        
         # 異常ケース
         "東京都大学学",
         "大大阪大学学",
     ]
     
-    print("大学名正規化テスト:")
+    print("大学名正規化テスト（完全強化版）:")
     for name in test_cases:
         normalized = normalize_university_name(name)
         status = "✅ 正規化" if name != normalized else "📝 保持"
