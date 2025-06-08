@@ -25,13 +25,33 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS設定
+# CORS設定（Vercel対応強化）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "*",  # 全てのオリジンを許可（開発用）
+        "http://localhost:3000",  # ローカルReact開発サーバー
+        "http://localhost:8080",  # ローカルVue/Angular開発サーバー
+        "http://127.0.0.1:3000",  # ローカル開発サーバー
+        "https://research-partner-dashboard.vercel.app",  # Vercel本番環境
+        "https://research-partner-dashboard-*.vercel.app",  # Vercelプレビュー環境
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=[
+        "*",
+        "Accept",
+        "Accept-Language",
+        "Content-Language",
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Origin",
+        "Access-Control-Allow-Origin",
+        "Access-Control-Allow-Headers",
+        "Access-Control-Allow-Methods",
+    ],
+    expose_headers=["*"],
 )
 
 # 環境変数
@@ -114,6 +134,41 @@ async def startup_event():
     except Exception as e:
         logger.error(f"❌ GCP初期化中にエラー: {e}")
         clients["initialized"] = False
+
+@app.middleware("http")
+async def cors_debug_middleware(request, call_next):
+    """リクエストのオリジンをログ出力してCORSデバッグを支援"""
+    origin = request.headers.get("origin", "No origin header")
+    method = request.method
+    url = str(request.url)
+    
+    logger.info(f"🌍 CORSリクエスト: {method} {url} from {origin}")
+    
+    # レスポンスを処理
+    response = await call_next(request)
+    
+    # 明示的にCORSヘッダーを追加（ミドルウェアで設定されているはずだが、明示的に追加）
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, HEAD"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    
+    logger.info(f"✅ CORSレスポンス: {response.status_code} to {origin}")
+    
+    return response
+
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    """明示的なCORS preflightリクエスト処理"""
+    return JSONResponse(
+        content={"message": "CORS preflight OK"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
 
 @app.get("/")
 async def root():
@@ -501,6 +556,10 @@ if __name__ == "__main__":
     print("   - 国立大学法人 + 東海国立大学機構 → 東海国立大学機構")
     print("   - 国立大学法人 + ○○大学 → ○○大学")
     print("   - ○○大学 + 任意の文字 → ○○大学")
+    print("🌍 CORS設定:")
+    print("   - Vercelフロントエンド対応（research-partner-dashboard.vercel.app）")
+    print("   - ローカル開発環境対応（localhost:3000, 8080）")
+    print("   - 全オリジン許可（ワイルドカード）")
     
     uvicorn.run(
         "main:app",
