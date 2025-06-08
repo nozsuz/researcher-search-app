@@ -196,12 +196,18 @@ def get_simple_university_query(table_name: str) -> str:
           WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
           WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
           
+          -- 【東海国立大学機構処理】東海国立大学機構 → 名古屋大学（主要構成大学）
+          WHEN main_affiliation_name_ja LIKE '%東海国立大学%' THEN '名古屋大学'
+          WHEN main_affiliation_name_ja LIKE '%東海国立大学機構%' THEN '名古屋大学'
+          
           -- 【国立大学法人処理】"国立大学法人〇〇大学" → "〇〇大学"
           WHEN main_affiliation_name_ja LIKE '国立大学法人%' THEN
             CASE 
               -- 国立大学法人内でも東京科学統合をチェック
               WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
               WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
+              -- 東海国立大学機構の処理
+              WHEN main_affiliation_name_ja LIKE '%東海国立大学%' THEN '名古屋大学'
               -- 一般的な国立大学法人処理
               WHEN main_affiliation_name_ja LIKE '国立大学法人東京大学%' THEN '東京大学'
               WHEN main_affiliation_name_ja LIKE '国立大学法人京都大学%' THEN '京都大学'
@@ -286,6 +292,7 @@ def get_simple_university_query(table_name: str) -> str:
       -- 統合情報の追加
       CASE 
         WHEN university_name = '東京科学大学' THEN '東京工業大学 + 東京医科歯科大学 + 東京科学大学'
+        WHEN university_name = '名古屋大学' THEN '名古屋大学 + 東海国立大学機構(名古屋大学+岐阜大学)'
         ELSE NULL
       END as merge_info
     FROM validated_universities
@@ -397,6 +404,7 @@ async def get_universities():
                     "method": "complete_university_integration_v4_safe",
                     "rules": [
                         "🔗 東京科学大学統合: 東京工業大学 + 東京医科歯科大学 + 東京科学大学",
+                        "🌏 東海国立大学機構統合: 東海国立大学機構(名古屋大学+岐阜大学) → 名古屋大学",
                         "🏛️ 国立大学法人の除去と統合処理",
                         "🧹 附属機関除外: 大学院・病院・研究科・センター等を親大学に統合",
                         "✂️ 異常パターン除外: 重複・空文字・短すぎる名前",
@@ -410,6 +418,10 @@ async def get_universities():
                         "count": tokyo_kagaku["count"] if tokyo_kagaku else 0,
                         "merge_info": tokyo_kagaku.get("merge_info") if tokyo_kagaku else None,
                         "expected_sources": "東京工業大学 + 東京医科歯科大学 + 東京科学大学"
+                    },
+                    "tokai_national_integration": {
+                        "rule": "東海国立大学機構 (名古屋大学+岐阜大学) → 名古屋大学",
+                        "reason": "名古屋大学が主要構成大学のため"
                     }
                 },
                 "execution_time": execution_time,
@@ -485,6 +497,7 @@ async def get_universities_fallback(error_type: str, error_message: str):
             "method": "complete_university_integration_v4",
             "rules": [
                 "🔗 東京科学大学統合: 東京工業大学 + 東京医科歯科大学 + 東京科学大学",
+                "🌏 東海国立大学機構統合: 東海国立大学機構(名古屋大学+岐阜大学) → 名古屋大学",
                 "🏛️ 国立大学法人の除去と統合処理",
                 "🧹 附属機関除外: 大学院・病院・研究科・センター等を親大学に統合",
                 "✂️ 異常パターン除外: 重複・空文字・短すぎる名前",
@@ -495,6 +508,10 @@ async def get_universities_fallback(error_type: str, error_message: str):
                 "success": True,
                 "count": 3503,
                 "sources": "東京工業大学 + 東京医科歯科大学 + 東京科学大学"
+            },
+            "tokai_national_integration": {
+                "rule": "東海国立大学機構 (名古屋大学+岐阜大学) → 名古屋大学",
+                "reason": "名古屋大学が主要構成大学のため"
             },
             "note": "完全統合対応の大学名抽出システム"
         }
