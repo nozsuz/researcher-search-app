@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 
 def normalize_university_name(university_name: str) -> str:
     """
-    大学名を正規化する（シンプル版・修正版）
+    大学名を正規化する（シンプル版・東海国立大学機構対応）
     ○○大学+{任意の文字} → ○○大学 に統合
     「国立大学法人」等の法人格を除去
+    東海国立大学機構の特殊処理
     """
     if not university_name:
         return ""
@@ -21,11 +22,26 @@ def normalize_university_name(university_name: str) -> str:
     normalized = university_name.strip()
     normalized = re.sub(r'[\s　]+', '', normalized)
     
+    # 特殊ケース：東海国立大学機構の処理（最優先）
+    if '東海国立大学機構' in normalized:
+        # 名古屋大学が含まれている場合
+        if '名古屋大学' in normalized:
+            return '名古屋大学'
+        # 岐阜大学が含まれている場合
+        elif '岐阜大学' in normalized:
+            return '岐阜大学'
+        else:
+            # 機構名のみの場合は「東海国立大学機構」として扱う
+            return '東海国立大学機構'
+    
     # 法人格の除去
     normalized = re.sub(r'^国立大学法人', '', normalized)
     normalized = re.sub(r'^公立大学法人', '', normalized) 
     normalized = re.sub(r'^学校法人', '', normalized)
     normalized = re.sub(r'^独立行政法人', '', normalized)
+    
+    # 機構名の除去（東海国立大学機構以外）
+    normalized = re.sub(r'機構', '', normalized)
     
     # 大学名の基本パターンを抽出
     # "○○大学" の部分を正しく抽出する
@@ -46,30 +62,42 @@ def normalize_university_name(university_name: str) -> str:
 
 def get_normalized_university_stats_query(table_name: str) -> str:
     """
-    シンプル版の大学統計クエリ（修正版）
+    シンプル版の大学統計クエリ（東海国立大学機構対応）
     REGEXP_EXTRACTを使用して○○大学の部分のみを正しく抽出
     「国立大学法人」等の法人格を除去
+    東海国立大学機構の特殊処理
     """
     return f"""
     WITH normalized_universities AS (
       SELECT 
         -- 大学名の基本部分を抽出（○○大学の部分のみ）
         CASE 
+          -- 東海国立大学機構の特殊処理
+          WHEN main_affiliation_name_ja LIKE '%東海国立大学機構%' AND main_affiliation_name_ja LIKE '%名古屋大学%' THEN '名古屋大学'
+          WHEN main_affiliation_name_ja LIKE '%東海国立大学機構%' AND main_affiliation_name_ja LIKE '%岐阜大学%' THEN '岐阜大学'
+          WHEN main_affiliation_name_ja LIKE '%東海国立大学機構%' THEN '東海国立大学機構'
+          
+          -- 統合処理
           WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'東京工業大学') THEN '東京科学大学'
           WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'東京医科歯科大学') THEN '東京科学大学'
+          
+          -- 通常の正規化処理
           ELSE REGEXP_EXTRACT(
             REGEXP_REPLACE(
               REGEXP_REPLACE(
                 REGEXP_REPLACE(
                   REGEXP_REPLACE(
-                    REGEXP_REPLACE(main_affiliation_name_ja, r'[\\s　]+', ''),
-                    r'^国立大学法人', ''
+                    REGEXP_REPLACE(
+                      REGEXP_REPLACE(main_affiliation_name_ja, r'[\\s　]+', ''),
+                      r'^国立大学法人', ''
+                    ),
+                    r'^公立大学法人', ''
                   ),
-                  r'^公立大学法人', ''
+                  r'^学校法人', ''
                 ),
-                r'^学校法人', ''
+                r'^独立行政法人', ''
               ),
-              r'^独立行政法人', ''
+              r'機構', ''
             ),
             r'(.+?大学)'
           )
@@ -134,7 +162,16 @@ def test_normalization():
         "国立大学法人大阪大学大学院",
         "公立大学法人大阪市立大学",
         "学校法人慶應義塾大学",
-        "東海国立大学機構名古屋大学"
+        # 東海国立大学機構のテストケース
+        "国立大学法人東海国立大学機構名古屋大学",
+        "国立大学法人東海国立大学機構",
+        "国立大学法人　東海国立大学機構　名古屋大学",
+        "国立大学法人 東海国立大学機構 名古屋大学",
+        "東海国立大学機構名古屋大学",
+        "東海国立大学機構　名古屋大学",
+        "東海国立大学機構 名古屋大学",
+        "東海国立大学機構名古屋大学大学院理学研究科",
+        "東海国立大学機構岐阜大学"
     ]
     
     print("大学名正規化テスト（シンプル版・修正版）:")
@@ -146,8 +183,9 @@ def test_normalization():
     print("\n" + "=" * 60)
     print("正規化ルール:")
     print("1. 法人格除去: 国立大学法人○○大学 → ○○大学")
-    print("2. 基本抽出: ○○大学+{任意文字} → ○○大学")
-    print("3. 統合処理: 東京工業大学・東京医科歯科大学 → 東京科学大学")
+    print("2. 東海機構特殊処理: 東海国立大学機構名古屋大学 → 名古屋大学")
+    print("3. 基本抽出: ○○大学+{任意文字} → ○○大学")
+    print("4. 統合処理: 東京工業大学・東京医科歯科大学 → 東京科学大学")
 
 if __name__ == "__main__":
     test_normalization()
