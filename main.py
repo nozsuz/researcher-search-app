@@ -185,30 +185,47 @@ async def get_universities():
     start_time = time.time()
     
     try:
-        logger.info("🏫 大学リスト取得開始（シンプルフォールバック版）")
+        logger.info("🏫 大学リスト取得開始（国立大学法人対応版）")
         
         # Step 1: GCPクライアント取得
         try:
             from gcp_auth import get_bigquery_client, get_gcp_status
             
-            # シンプルクエリを直接定義
+            # 大学名統合クエリ（国立大学法人対応版）
             def get_simple_university_query(table_name: str) -> str:
                 return f"""
                 SELECT 
-                    REGEXP_EXTRACT(main_affiliation_name_ja, r'(.+?大学)') as university_name,
+                    CASE
+                        -- 国立大学法人東海国立大学機構関連の統合
+                        WHEN main_affiliation_name_ja REGEXP r'国立大学法人.*?東海国立大学機構.*?名古屋大学' THEN '名古屋大学'
+                        WHEN main_affiliation_name_ja REGEXP r'東海国立大学機構.*?名古屋大学' THEN '名古屋大学'
+                        WHEN main_affiliation_name_ja REGEXP r'国立大学法人.*?東海国立大学機構' AND main_affiliation_name_ja NOT LIKE '%名古屋大学%' THEN '東海国立大学機構'
+                        WHEN main_affiliation_name_ja REGEXP r'東海国立大学機構' AND main_affiliation_name_ja NOT LIKE '%名古屋大学%' THEN '東海国立大学機構'
+                        
+                        -- 一般的な国立大学法人の処理
+                        WHEN main_affiliation_name_ja REGEXP r'^国立大学法人\s*(.+?大学)' THEN 
+                            REGEXP_EXTRACT(main_affiliation_name_ja, r'^国立大学法人\s*(.+?大学)')
+                        
+                        -- 通常の大学名抽出
+                        WHEN main_affiliation_name_ja REGEXP r'(.+?大学)' THEN 
+                            REGEXP_EXTRACT(main_affiliation_name_ja, r'(.+?大学)')
+                        
+                        ELSE main_affiliation_name_ja
+                    END as university_name,
                     COUNT(DISTINCT name_ja) as researcher_count,
                     ARRAY_AGG(DISTINCT main_affiliation_name_ja ORDER BY main_affiliation_name_ja LIMIT 10) as original_names
                 FROM `{table_name}`
                 WHERE main_affiliation_name_ja IS NOT NULL
                   AND main_affiliation_name_ja LIKE '%大学%'
-                  AND REGEXP_EXTRACT(main_affiliation_name_ja, r'(.+?大学)') IS NOT NULL
                 GROUP BY university_name
                 HAVING COUNT(DISTINCT name_ja) >= 5
+                  AND university_name IS NOT NULL
+                  AND university_name != ''
                 ORDER BY researcher_count DESC
                 LIMIT 100
                 """
             
-            logger.info("✅ シンプルフォールバッククエリを使用")
+            logger.info("✅ 国立大学法人対応統合クエリを使用")
         except ImportError as e:
             logger.error(f"❌ モジュールインポートエラー: {e}")
             return await get_universities_fallback("module_import_error", str(e))
@@ -226,7 +243,7 @@ async def get_universities():
         # Step 3: BigQueryクエリ実行
         try:
             query = get_simple_university_query(BIGQUERY_TABLE)
-            logger.info(f"✅ シンプルクエリ生成成功: {len(query)}文字")
+            logger.info(f"✅ 国立大学法人対応クエリ生成成功: {len(query)}文字")
             
             logger.info("🔍 BigQueryクエリ実行開始")
             query_job = bq_client.query(query)
@@ -272,8 +289,13 @@ async def get_universities():
                 "total_universities": len(universities),
                 "universities": universities,
                 "normalization_info": {
-                    "method": "simple_pattern_extraction",
-                    "rule": "○○大学+{任意の文字} → ○○大学",
+                    "method": "enhanced_university_normalization",
+                    "rules": [
+                        "国立大学法人 + 東海国立大学機構 + 名古屋大学 → 名古屋大学",
+                        "国立大学法人 + 東海国立大学機構 → 東海国立大学機構",
+                        "国立大学法人 + ○○大学 → ○○大学",
+                        "○○大学 + 任意の文字 → ○○大学"
+                    ],
                     "consolidated_universities": len(normalization_details),
                     "details": normalization_details[:10]  # 上位10件の詳細のみ
                 },
@@ -330,10 +352,15 @@ async def get_universities_fallback(error_type: str, error_message: str):
             "note": "これは完全統合版の期待結果です（JSONデータ分析後）。システム修復後、100%統合が実現されます。"
         },
         "normalization_info": {
-            "method": "simple_pattern_extraction",
-            "rule": "○○大学+{任意の文字} → ○○大学",
+            "method": "enhanced_university_normalization",
+            "rules": [
+                "国立大学法人 + 東海国立大学機構 + 名古屋大学 → 名古屋大学",
+                "国立大学法人 + 東海国立大学機構 → 東海国立大学機構",
+                "国立大学法人 + ○○大学 → ○○大学",
+                "○○大学 + 任意の文字 → ○○大学"
+            ],
             "consolidated_universities": 20,
-            "note": "シンプルパターン抽出による統合システム"
+            "note": "国立大学法人対応の高度な統合システム"
         }
     }
 
@@ -465,11 +492,15 @@ if __name__ == "__main__":
     import uvicorn
     
     port = int(os.environ.get("PORT", 8000))
-    print(f"🚀 Starting Research API v2.0 (修復版) on port {port}")
+    print(f"🚀 Starting Research API v2.0 (国立大学法人対応版) on port {port}")
     print("📚 利用可能なエンドポイント:")
-    print("  - /api/universities (メイン - シンプル版統合)")
+    print("  - /api/universities (メイン - 国立大学法人対応統合)")
     print("  - /api/search (研究者検索)")
-    print("🔄 正規化ルール: ○○大学+{任意の文字} → ○○大学")
+    print("🔄 正規化ルール:")
+    print("   - 国立大学法人 + 東海国立大学機構 + 名古屋大学 → 名古屋大学")
+    print("   - 国立大学法人 + 東海国立大学機構 → 東海国立大学機構")
+    print("   - 国立大学法人 + ○○大学 → ○○大学")
+    print("   - ○○大学 + 任意の文字 → ○○大学")
     
     uvicorn.run(
         "main:app",
