@@ -565,12 +565,32 @@ async def get_universities():
             # BigQueryから大学名と研究者数を取得
             # 同一大学の表記揺れを考慮した集計
             query = f"""
+            WITH university_mapping AS (
+                SELECT 
+                    name_ja,
+                    main_affiliation_name_ja,
+                    CASE 
+                        -- 明示的な統合マッピング
+                        WHEN main_affiliation_name_ja = '東京大学大学院' THEN '東京大学'
+                        WHEN main_affiliation_name_ja = '北海道大学病院' THEN '北海道大学'
+                        WHEN main_affiliation_name_ja = '東京大学医学部附属病院' THEN '東京大学'
+                        WHEN main_affiliation_name_ja = '東北大学病院' THEN '東北大学'
+                        WHEN main_affiliation_name_ja = '京都大学大学院' THEN '京都大学'
+                        WHEN main_affiliation_name_ja = '大阪大学大学院医学系研究科' THEN '大阪大学'
+                        WHEN main_affiliation_name_ja = '北海道大学大学院' THEN '北海道大学'
+                        WHEN main_affiliation_name_ja = '九州大学病院' THEN '九州大学'
+                        WHEN main_affiliation_name_ja = '東京大学大学院医学系研究科' THEN '東京大学'
+                        -- その他はそのまま
+                        ELSE main_affiliation_name_ja
+                    END as mapped_university_name
+                FROM `{BIGQUERY_TABLE}`
+                WHERE main_affiliation_name_ja IS NOT NULL
+            )
             SELECT 
-                main_affiliation_name_ja as university_name,
+                mapped_university_name as university_name,
                 COUNT(DISTINCT name_ja) as researcher_count
-            FROM `{BIGQUERY_TABLE}`
-            WHERE main_affiliation_name_ja IS NOT NULL
-            GROUP BY main_affiliation_name_ja
+            FROM university_mapping
+            GROUP BY mapped_university_name
             ORDER BY researcher_count DESC
             """
             
