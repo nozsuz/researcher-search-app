@@ -11,7 +11,6 @@ from pydantic import BaseModel
 import pandas as pd
 import os
 import time
-import asyncio
 from typing import List, Optional, Dict, Any
 import logging
 
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="研究者検索API",
     description="AI研究者検索システムのAPIエンドポイント",
-    version="2.0.3"
+    version="2.0.2"
 )
 
 # CORS設定
@@ -91,16 +90,6 @@ class SearchResponse(BaseModel):
     executed_query_info: Optional[str] = None
     expanded_info: Optional[dict] = None
 
-class AnalyzeRequest(BaseModel):
-    researchmap_url: str
-    query: str
-    researcher_basic_info: Optional[Dict[str, Any]] = None
-
-class AnalysisResponse(BaseModel):
-    status: str
-    analysis: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-
 @app.on_event("startup")
 async def startup_event():
     """アプリケーション開始時にGCPクライアントを初期化"""
@@ -130,21 +119,19 @@ async def startup_event():
 async def root():
     """ルートエンドポイント"""
     return {
-        "message": "🚀 研究者検索API v2.0.3 サーバー稼働中（ResearchMap分析対応）",
+        "message": "🚀 研究者検索API v2.0.2 サーバー稼働中（完全統合版）",
         "status": "healthy",
         "timestamp": time.time(),
-        "version": "2.0.3",
+        "version": "2.0.2",
         "endpoints": {
             "/health": "ヘルスチェック",
             "/api/universities": "大学リスト",
             "/api/search": "研究者検索",
-            "/api/analyze-researcher": "研究者詳細分析",
             "/test_api.html": "テストツール"
         },
         "features": {
             "search_api": "✅ 利用可能" if clients["initialized"] else "🔄 準備中",
-            "gcp_integration": "✅ 準備完了" if clients["initialized"] else "🔄 準備中",
-            "researchmap_analysis": "✅ 利用可能"
+            "gcp_integration": "✅ 準備完了" if clients["initialized"] else "🔄 準備中"
         }
     }
 
@@ -166,7 +153,7 @@ async def health_check():
         "status": "healthy",
         "timestamp": time.time(),
         "server_info": {
-            "version": "2.0.3",
+            "version": "2.0.2",
             "project_id": PROJECT_ID,
             "location": LOCATION
         },
@@ -181,7 +168,6 @@ async def health_check():
             "/health": "✅ 利用可能",
             "/api/search": "✅ 実際検索可能" if clients["initialized"] else "🔄 準備中（モック応答あり）",
             "/api/universities": "✅ 利用可能",
-            "/api/analyze-researcher": "✅ ResearchMap分析可能",
             "/test_api.html": "✅ 利用可能"
         },
         "gcp_details": gcp_status
@@ -638,79 +624,6 @@ async def search_researchers(request: SearchRequest):
     logger.info(f"✅ モック検索完了: {len(mock_results)}件, {execution_time:.2f}秒")
     return response
 
-@app.post("/api/analyze-researcher", response_model=AnalysisResponse)
-async def analyze_researcher(request: AnalyzeRequest):
-    """
-    ResearchMap APIを使用した研究者詳細分析エンドポイント
-    """
-    start_time = time.time()
-    
-    logger.info(f"🔍 研究者分析リクエスト受信: {request.researchmap_url}, query: {request.query}")
-    
-    try:
-        # ResearchMapAnalyzerをインポート
-        try:
-            from researchmap.analyzer import ResearchMapAnalyzer
-            logger.info("✅ ResearchMapAnalyzerインポート成功")
-        except ImportError as e:
-            logger.error(f"❌ ResearchMapAnalyzerインポートエラー: {e}")
-            import traceback
-            logger.error(f"📋 インポートエラー詳細: {traceback.format_exc()}")
-            return AnalysisResponse(
-                status="error",
-                error=f"ResearchMapAnalyzer モジュールが見つかりません: {str(e)}",
-                analysis=None
-            )
-        
-        # アナライザーのインスタンス作成
-        try:
-            analyzer = ResearchMapAnalyzer()
-            logger.info("✅ ResearchMapAnalyzerインスタンス作成成功")
-        except Exception as e:
-            logger.error(f"❌ ResearchMapAnalyzerインスタンス作成エラー: {e}")
-            import traceback
-            logger.error(f"📋 インスタンス作成エラー詳細: {traceback.format_exc()}")
-            return AnalysisResponse(
-                status="error",
-                error=f"アナライザーの初期化に失敗しました: {str(e)}",
-                analysis=None
-            )
-        
-        # 分析実行
-        try:
-            result = await analyzer.analyze_researcher(
-                researchmap_url=request.researchmap_url,
-                query=request.query,
-                basic_info=request.researcher_basic_info
-            )
-            logger.info(f"✅ 分析実行成功: {result.get('status', 'unknown')}")
-        except Exception as e:
-            logger.error(f"❌ 分析実行エラー: {e}")
-            import traceback
-            logger.error(f"📋 分析実行エラー詳細: {traceback.format_exc()}")
-            return AnalysisResponse(
-                status="error",
-                error=f"分析実行中にエラーが発生しました: {str(e)}",
-                analysis=None
-            )
-        
-        execution_time = time.time() - start_time
-        logger.info(f"✅ 研究者分析完了: {execution_time:.2f}秒")
-        
-        return AnalysisResponse(**result)
-        
-    except Exception as e:
-        execution_time = time.time() - start_time
-        logger.error(f"❌ 研究者分析で予期しないエラー: {e}")
-        import traceback
-        logger.error(f"📋 予期しないエラー詳細: {traceback.format_exc()}")
-        
-        return AnalysisResponse(
-            status="error",
-            error=f"予期しないエラーが発生しました: {str(e)}",
-            analysis=None
-        )
-
 # エラーハンドラー
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
@@ -724,18 +637,16 @@ if __name__ == "__main__":
     import uvicorn
     
     port = int(os.environ.get("PORT", 8000))
-    print(f"🚀 Starting Research API v2.0.3 (ResearchMap分析対応) on port {port}")
+    print(f"🚀 Starting Research API v2.0.2 (完全統合版) on port {port}")
     print("📚 利用可能なエンドポイント:")
     print("  - /api/universities (メイン - 完全統合対応大学名抽出)")
     print("  - /api/search (研究者検索)")
-    print("  - /api/analyze-researcher (ResearchMap詳細分析)")
     print("🔗 完全統合機能:")
     print("   ✅ 東京科学大学統合: 東京工業 + 東京医科歯科 → 東京科学 (3,503名)")
     print("   ✅ 附属機関統合: 大学院・病院・研究科 → 親大学")
     print("   ✅ 国立大学法人除去と統合処理")
     print("   ✅ 負の先読み正規表現で精密な大学名抽出")
     print("   ✅ 異常パターンの完全除去とクリーンなデータ")
-    print("   ✅ ResearchMap API連携による詳細分析")
     
     uvicorn.run(
         "main:app",
