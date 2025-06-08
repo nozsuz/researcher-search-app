@@ -1,5 +1,5 @@
 """
-大学名正規化システム - シンプル版
+大学名正規化システム - シンプル版（修正版）
 ○○大学+{任意の文字} → ○○大学 に統合
 """
 
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 def normalize_university_name(university_name: str) -> str:
     """
-    大学名を正規化する（シンプル版）
+    大学名を正規化する（シンプル版・修正版）
     ○○大学+{任意の文字} → ○○大学 に統合
     """
     if not university_name:
@@ -21,8 +21,8 @@ def normalize_university_name(university_name: str) -> str:
     normalized = re.sub(r'[\s　]+', '', normalized)
     
     # 大学名の基本パターンを抽出
-    # "○○大学" の部分だけを抽出する
-    match = re.search(r'([^大学]*大学)', normalized)
+    # "○○大学" の部分を正しく抽出する
+    match = re.search(r'(.+?大学)', normalized)
     if match:
         base_university = match.group(1)
         
@@ -39,8 +39,8 @@ def normalize_university_name(university_name: str) -> str:
 
 def get_normalized_university_stats_query(table_name: str) -> str:
     """
-    シンプル版の大学統計クエリ
-    REGEXP_EXTRACTを使用して○○大学の部分のみを抽出
+    シンプル版の大学統計クエリ（修正版）
+    REGEXP_EXTRACTを使用して○○大学の部分のみを正しく抽出
     """
     return f"""
     WITH normalized_universities AS (
@@ -51,7 +51,7 @@ def get_normalized_university_stats_query(table_name: str) -> str:
           WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'東京医科歯科大学') THEN '東京科学大学'
           ELSE REGEXP_EXTRACT(
             REGEXP_REPLACE(main_affiliation_name_ja, r'[\\s　]+', ''),
-            r'([^大学]*大学)'
+            r'(.+?大学)'
           )
         END as university_name,
         name_ja,
@@ -59,7 +59,7 @@ def get_normalized_university_stats_query(table_name: str) -> str:
       FROM `{table_name}`
       WHERE main_affiliation_name_ja IS NOT NULL
         AND main_affiliation_name_ja LIKE '%大学%'
-        AND REGEXP_CONTAINS(main_affiliation_name_ja, r'[^大学]*大学')
+        AND REGEXP_CONTAINS(main_affiliation_name_ja, r'.+大学')
     ),
     
     university_stats AS (
@@ -70,6 +70,7 @@ def get_normalized_university_stats_query(table_name: str) -> str:
       FROM normalized_universities
       WHERE university_name IS NOT NULL
         AND university_name != ''
+        AND university_name != '大学'  -- "大学"のみを除外
       GROUP BY university_name
       HAVING COUNT(DISTINCT name_ja) >= 5
     )
@@ -105,14 +106,23 @@ def test_normalization():
         "大阪大学",
         "大阪大学大学院医学系研究科",
         "北海道大学病院",
-        "九州大学農学研究院"
+        "九州大学農学研究院",
+        "慶應義塾大学",
+        "東京理科大学",
+        "国立大学法人東京大学",
+        "東海国立大学機構名古屋大学"
     ]
     
-    print("大学名正規化テスト（シンプル版）:")
-    print("-" * 50)
+    print("大学名正規化テスト（シンプル版・修正版）:")
+    print("-" * 60)
     for name in test_cases:
         normalized = normalize_university_name(name)
         print(f"{name:<40} → {normalized}")
+    
+    print("\n" + "=" * 60)
+    print("正規表現の説明:")
+    print("修正前: [^大学]*大学  → 「大学」以外の文字 + 「大学」（間違い）")
+    print("修正後: .+?大学       → 任意の文字（非貪欲） + 「大学」（正しい）")
 
 if __name__ == "__main__":
     test_normalization()
