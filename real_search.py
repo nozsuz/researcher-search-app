@@ -436,18 +436,26 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         # クエリベクトルを文字列形式に変換
         query_embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
         
-        # 大学フィルター条件の構築（動的正規化対応）
+        # 大学フィルター条件の構築（安全版）
         university_condition = ""
         if university_filter and len(university_filter) > 0:
-            from university_normalizer import get_university_normalization_sql
-            
-            # SQLインジェクション対策
-            safe_universities = [univ.replace("'", "''") for univ in university_filter]
-            university_list = ",".join([f"'{univ}'" for univ in safe_universities])
-            
-            # 正規化システムを使用してフィルタリング
-            normalization_sql = get_university_normalization_sql("main_affiliation_name_ja")
-            university_condition = f" AND ({normalization_sql}) IN ({university_list})"
+            try:
+                from university_normalizer_fixed import get_university_normalization_sql
+                
+                # SQLインジェクション対策
+                safe_universities = [univ.replace("'", "''") for univ in university_filter]
+                university_list = ",".join([f"'{univ}'" for univ in safe_universities])
+                
+                # 正規化システムを使用してフィルタリング
+                normalization_sql = get_university_normalization_sql("main_affiliation_name_ja")
+                university_condition = f" AND ({normalization_sql}) IN ({university_list})"
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 大学正規化システムエラー、シンプルフィルターを使用: {e}")
+                # フォールバック：シンプルな大学フィルタリング
+                safe_universities = [univ.replace("'", "''") for univ in university_filter]
+                like_conditions = [f"main_affiliation_name_ja LIKE '%{univ}%'" for univ in safe_universities]
+                university_condition = f" AND ({' OR '.join(like_conditions)})"
         
         # 2. VECTOR_SEARCH関数を使用してセマンティック検索
         sql_query_semantic = f"""
@@ -576,18 +584,26 @@ async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: s
         # データベースから研究者データを取得（テキスト形式）
         first_keyword = query.split()[0] if query.split() else query
         
-        # 大学フィルター条件の構築（動的正規化対応）
+        # 大学フィルター条件の構築（安全版）
         university_condition = ""
         if university_filter and len(university_filter) > 0:
-            from university_normalizer import get_university_normalization_sql
-            
-            # SQLインジェクション対策
-            safe_universities = [univ.replace("'", "''") for univ in university_filter]
-            university_list = ",".join([f"'{univ}'" for univ in safe_universities])
-            
-            # 正規化システムを使用してフィルタリング
-            normalization_sql = get_university_normalization_sql("main_affiliation_name_ja")
-            university_condition = f" AND ({normalization_sql}) IN ({university_list})"
+            try:
+                from university_normalizer_fixed import get_university_normalization_sql
+                
+                # SQLインジェクション対策
+                safe_universities = [univ.replace("'", "''") for univ in university_filter]
+                university_list = ",".join([f"'{univ}'" for univ in safe_universities])
+                
+                # 正規化システムを使用してフィルタリング
+                normalization_sql = get_university_normalization_sql("main_affiliation_name_ja")
+                university_condition = f" AND ({normalization_sql}) IN ({university_list})"
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 大学正規化システムエラー、シンプルフィルターを使用: {e}")
+                # フォールバック：シンプルな大学フィルタリング
+                safe_universities = [univ.replace("'", "''") for univ in university_filter]
+                like_conditions = [f"main_affiliation_name_ja LIKE '%{univ}%'" for univ in safe_universities]
+                university_condition = f" AND ({' OR '.join(like_conditions)})"
         
         search_sql = f"""
         SELECT 
@@ -785,18 +801,26 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
         
         total_relevance_score = " + ".join(relevance_scores) if relevance_scores else "0"
         
-        # 大学フィルター条件の構築（動的正規化対応）
+        # 大学フィルター条件の構築（安全版）
         university_condition = ""
         if university_filter and len(university_filter) > 0:
-            from university_normalizer import get_university_normalization_sql
-            
-            # SQLインジェクション対策
-            safe_universities = [univ.replace("'", "''") for univ in university_filter]
-            university_list = ",".join([f"'{univ}'" for univ in safe_universities])
-            
-            # 正規化システムを使用してフィルタリング
-            normalization_sql = get_university_normalization_sql("main_affiliation_name_ja")
-            university_condition = f" AND ({normalization_sql}) IN ({university_list})"
+            try:
+                from university_normalizer_fixed import get_university_normalization_sql
+                
+                # SQLインジェクション対策
+                safe_universities = [univ.replace("'", "''") for univ in university_filter]
+                university_list = ",".join([f"'{univ}'" for univ in safe_universities])
+                
+                # 正規化システムを使用してフィルタリング
+                normalization_sql = get_university_normalization_sql("main_affiliation_name_ja")
+                university_condition = f" AND ({normalization_sql}) IN ({university_list})"
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 大学正規化システムエラー、シンプルフィルターを使用: {e}")
+                # フォールバック：シンプルな大学フィルタリング
+                safe_universities = [univ.replace("'", "''") for univ in university_filter]
+                like_conditions = [f"main_affiliation_name_ja LIKE '%{univ}%'" for univ in safe_universities]
+                university_condition = f" AND ({' OR '.join(like_conditions)})"
         
         search_sql = f"""
         SELECT 
