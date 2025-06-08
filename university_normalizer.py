@@ -1,6 +1,6 @@
 """
-大学名正規化システム - 確実なパターンマッチング版
-BigQueryでのパターンマッチングを確実にする
+大学名正規化システム - 最終完成版
+病院系と研究科系の完全統合
 """
 
 import re
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 def normalize_university_name(university_name: str) -> str:
     """
-    大学名を正規化する（確実なパターンマッチング版）
+    大学名を正規化する（最終完成版）
     """
     if not university_name:
         return ""
@@ -19,13 +19,12 @@ def normalize_university_name(university_name: str) -> str:
     
     # 包括的な正規化パターン（長いパターンから先に処理）
     patterns = [
-        # 複合パターン（大学院+学部/研究科系）
-        (r'大学院歯学研究院$', ''),
-        (r'大学院人文社会系$', ''),
-        (r'大学院総合文化$', ''),
-        (r'大学院農学生命科学$', ''),
-        (r'大学院薬学系$', ''),
-        (r'大学院歯学$', ''),
+        # 複合パターン（大学院+研究科系）
+        (r'大学院歯学研究科$', ''),
+        (r'大学院人文社会系研究科$', ''),
+        (r'大学院総合文化研究科$', ''),
+        (r'大学院農学生命科学研究科$', ''),
+        (r'大学院薬学系研究科$', ''),
         (r'大学院医学系研究科$', ''),
         (r'大学院医学研究科$', ''),
         (r'大学院工学研究科$', ''),
@@ -34,8 +33,20 @@ def normalize_university_name(university_name: str) -> str:
         (r'大学院法学研究科$', ''),
         (r'大学院経済学研究科$', ''),
         
-        # 医学系（複合）
+        # 複合パターン（大学院+その他）
+        (r'大学院歯学研究院$', ''),
+        (r'大学院人文社会系$', ''),
+        (r'大学院総合文化$', ''),
+        (r'大学院農学生命科学$', ''),
+        (r'大学院薬学系$', ''),
+        (r'大学院歯学$', ''),
+        
+        # 病院系（先に処理）
+        (r'附属病院$', ''),
+        (r'病院$', ''),
         (r'医学部附属病院$', ''),
+        
+        # 医学系（複合）
         (r'医学系研究科$', ''),
         (r'医学研究科$', ''),
         (r'医学医療系$', ''),
@@ -45,10 +56,15 @@ def normalize_university_name(university_name: str) -> str:
         
         # その他の学系
         (r'歯学研究院$', ''),
+        (r'歯学研究科$', ''),
+        (r'薬学系研究科$', ''),
         (r'薬学系$', ''),
         (r'歯学$', ''),
         
         # 研究科系
+        (r'人文社会系研究科$', ''),
+        (r'総合文化研究科$', ''),
+        (r'農学生命科学研究科$', ''),
         (r'人文社会系$', ''),
         (r'総合文化$', ''),
         (r'農学生命科学$', ''),
@@ -77,11 +93,8 @@ def normalize_university_name(university_name: str) -> str:
         (r'センター$', ''),
         (r'研究院$', ''),
         
-        # 病院系
-        (r'附属病院$', ''),
-        (r'病院$', ''),
-        
         # その他（最後に処理）
+        (r'短期大学部$', ''),
         (r'短期大$', ''),
         (r'大学院$', ''),
     ]
@@ -99,12 +112,12 @@ def normalize_university_name(university_name: str) -> str:
 
 def get_normalized_university_stats_query(table_name: str) -> str:
     """
-    確実なパターンマッチング版の大学統計クエリ
+    最終完成版の大学統計クエリ
     """
     return f"""
     WITH normalized_universities AS (
       SELECT 
-        -- 多段階の正規化処理
+        -- 多段階の正規化処理（最終版）
         REGEXP_REPLACE(
           REGEXP_REPLACE(
             REGEXP_REPLACE(
@@ -126,46 +139,90 @@ def get_normalized_university_stats_query(table_name: str) -> str:
                                             REGEXP_REPLACE(
                                               REGEXP_REPLACE(
                                                 REGEXP_REPLACE(
-                                                  CASE 
-                                                    WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
-                                                    WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
-                                                    ELSE main_affiliation_name_ja
-                                                  END,
-                                                  r'大学院歯学研究院$', ''
+                                                  REGEXP_REPLACE(
+                                                    REGEXP_REPLACE(
+                                                      REGEXP_REPLACE(
+                                                        REGEXP_REPLACE(
+                                                          CASE 
+                                                            WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
+                                                            WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
+                                                            ELSE main_affiliation_name_ja
+                                                          END,
+                                                          r'大学院人文社会系研究科$', ''
+                                                        ),
+                                                        r'大学院総合文化研究科$', ''
+                                                      ),
+                                                      r'大学院農学生命科学研究科$', ''
+                                                    ),
+                                                    r'大学院薬学系研究科$', ''
+                                                  ),
+                                                  r'大学院歯学研究科$', ''
                                                 ),
-                                                r'大学院人文社会系$', ''
+                                                r'大学院医学系研究科$', ''
                                               ),
-                                              r'大学院総合文化$', ''
+                                              r'大学院医学研究科$', ''
                                             ),
-                                            r'大学院農学生命科学$', ''
+                                            r'大学院歯学研究院$', ''
                                           ),
-                                          r'大学院薬学系$', ''
+                                          r'大学院人文社会系$', ''
                                         ),
-                                        r'大学院歯学$', ''
+                                        r'大学院総合文化$', ''
                                       ),
-                                      r'大学院医学系研究科$', ''
+                                      r'大学院農学生命科学$', ''
                                     ),
-                                    r'大学院医学研究科$', ''
+                                    r'大学院薬学系$', ''
                                   ),
-                                  r'医学部附属病院$', ''
+                                  r'大学院歯学$', ''
                                 ),
-                                r'医学系研究科$', ''
+                                r'附属病院$', ''
                               ),
-                              r'医学研究科$', ''
+                              r'病院$', ''
                             ),
-                            r'医学医療系$', ''
+                            r'医学部附属病院$', ''
                           ),
-                          r'医学研究院$', ''
+                          r'医学系研究科$', ''
                         ),
-                        r'医学部$', ''
+                        r'医学研究科$', ''
                       ),
-                      r'医科学研究所$', ''
+                      r'医学医療系$', ''
                     ),
-                    r'歯学研究院$', ''
+                    r'医学研究院$', ''
                   ),
-                  r'薬学系$', ''
+                  r'医学部$', ''
                 ),
-                r'生産技術$', ''
+                r'医科学研究所$', ''
+              ),
+              r'歯学研究科$', ''
+            ),
+            r'薬学系研究科$', ''
+          ),
+          r'人文社会系研究科$', ''
+        ) as temp_name,
+        name_ja,
+        main_affiliation_name_ja as original_name
+      FROM `{table_name}`
+      WHERE main_affiliation_name_ja IS NOT NULL
+        AND main_affiliation_name_ja LIKE '%大学%'
+    ),
+    
+    final_normalized AS (
+      SELECT 
+        -- 第二段階の正規化
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(
+            REGEXP_REPLACE(
+              REGEXP_REPLACE(
+                REGEXP_REPLACE(
+                  REGEXP_REPLACE(
+                    REGEXP_REPLACE(
+                      temp_name,
+                      r'総合文化研究科$', ''
+                    ),
+                    r'農学生命科学研究科$', ''
+                  ),
+                  r'生産技術$', ''
+                ),
+                r'短期大学部$', ''
               ),
               r'研究院$', ''
             ),
@@ -174,10 +231,8 @@ def get_normalized_university_stats_query(table_name: str) -> str:
           r'大学院$', ''
         ) as university_name,
         name_ja,
-        main_affiliation_name_ja as original_name
-      FROM `{table_name}`
-      WHERE main_affiliation_name_ja IS NOT NULL
-        AND main_affiliation_name_ja LIKE '%大学%'
+        original_name
+      FROM normalized_universities
     ),
     
     university_stats AS (
@@ -185,7 +240,7 @@ def get_normalized_university_stats_query(table_name: str) -> str:
         university_name,
         COUNT(DISTINCT name_ja) as researcher_count,
         ARRAY_AGG(DISTINCT original_name) as original_names
-      FROM normalized_universities
+      FROM final_normalized
       GROUP BY university_name
       HAVING COUNT(DISTINCT name_ja) >= 5
     )
