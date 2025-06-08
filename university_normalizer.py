@@ -1,6 +1,6 @@
 """
-大学名正規化システム - シンプル版
-BigQueryエラーを避けるための基本的な正規化のみ
+大学名正規化システム - 修正版
+BigQueryでの正規化順序を修正
 """
 
 import re
@@ -10,21 +10,56 @@ logger = logging.getLogger(__name__)
 
 def normalize_university_name(university_name: str) -> str:
     """
-    大学名を正規化する（シンプル版）
+    大学名を正規化する（順序修正版）
     """
     if not university_name:
         return ""
     
     normalized = university_name.strip()
     
-    # 基本的な附属機関の除去
+    # 複合パターンを先に処理（長いパターンから先に）
     patterns = [
-        (r'附属病院$', ''),
-        (r'史料編纂所$', ''),
+        # 複合パターン（先に処理）
+        (r'大学院医学系研究科$', ''),
+        (r'大学院医学研究科$', ''),
+        (r'大学院工学研究科$', ''),
+        (r'大学院理学研究科$', ''),
+        (r'大学院文学研究科$', ''),
+        (r'大学院法学研究科$', ''),
+        (r'大学院経済学研究科$', ''),
+        # 医学系（複合）
+        (r'医学部附属病院$', ''),
+        (r'医学系研究科$', ''),
+        (r'医学研究科$', ''),
         (r'医学医療系$', ''),
         (r'医学研究院$', ''),
+        (r'医学部$', ''),
+        (r'医科学研究所$', ''),
+        # 研究科系
+        (r'工学研究科$', ''),
+        (r'理学研究科$', ''),
+        (r'文学研究科$', ''),
+        (r'法学研究科$', ''),
+        (r'経済学研究科$', ''),
+        (r'研究科$', ''),
+        # 学部系
+        (r'工学部$', ''),
+        (r'理学部$', ''),
+        (r'文学部$', ''),
+        (r'法学部$', ''),
+        (r'経済学部$', ''),
+        (r'学部$', ''),
+        # 研究所・機関系
+        (r'史料編纂所$', ''),
         (r'総合研究博物館$', ''),
+        (r'核物理研究センター$', ''),
+        (r'金属材料研究所$', ''),
+        (r'研究所$', ''),
+        (r'センター$', ''),
+        # 病院系
+        (r'附属病院$', ''),
         (r'病院$', ''),
+        # その他（最後に処理）
         (r'大学院$', ''),
     ]
     
@@ -41,21 +76,65 @@ def normalize_university_name(university_name: str) -> str:
 
 def get_normalized_university_stats_query(table_name: str) -> str:
     """
-    シンプルな大学統計クエリ
+    修正された大学統計クエリ（正規化順序修正版）
     """
     return f"""
     WITH normalized_universities AS (
       SELECT 
         CASE 
+          -- 大学統合
           WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
           WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
-          WHEN main_affiliation_name_ja LIKE '%附属病院' THEN REGEXP_REPLACE(main_affiliation_name_ja, '附属病院$', '')
-          WHEN main_affiliation_name_ja LIKE '%史料編纂所' THEN REGEXP_REPLACE(main_affiliation_name_ja, '史料編纂所$', '')
+          
+          -- 複合パターン（先に処理）
+          WHEN main_affiliation_name_ja LIKE '%大学院医学系研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '大学院医学系研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%大学院医学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '大学院医学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%大学院工学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '大学院工学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%大学院理学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '大学院理学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%大学院文学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '大学院文学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%大学院法学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '大学院法学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%大学院経済学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '大学院経済学研究科$', '')
+          
+          -- 医学系（複合）
+          WHEN main_affiliation_name_ja LIKE '%医学部附属病院' THEN REGEXP_REPLACE(main_affiliation_name_ja, '医学部附属病院$', '')
+          WHEN main_affiliation_name_ja LIKE '%医学系研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '医学系研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%医学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '医学研究科$', '')
           WHEN main_affiliation_name_ja LIKE '%医学医療系' THEN REGEXP_REPLACE(main_affiliation_name_ja, '医学医療系$', '')
           WHEN main_affiliation_name_ja LIKE '%医学研究院' THEN REGEXP_REPLACE(main_affiliation_name_ja, '医学研究院$', '')
+          WHEN main_affiliation_name_ja LIKE '%医学部' THEN REGEXP_REPLACE(main_affiliation_name_ja, '医学部$', '')
+          WHEN main_affiliation_name_ja LIKE '%医科学研究所' THEN REGEXP_REPLACE(main_affiliation_name_ja, '医科学研究所$', '')
+          
+          -- 研究科系
+          WHEN main_affiliation_name_ja LIKE '%工学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '工学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%理学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '理学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%文学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '文学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%法学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '法学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%経済学研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '経済学研究科$', '')
+          WHEN main_affiliation_name_ja LIKE '%研究科' THEN REGEXP_REPLACE(main_affiliation_name_ja, '研究科$', '')
+          
+          -- 学部系
+          WHEN main_affiliation_name_ja LIKE '%工学部' THEN REGEXP_REPLACE(main_affiliation_name_ja, '工学部$', '')
+          WHEN main_affiliation_name_ja LIKE '%理学部' THEN REGEXP_REPLACE(main_affiliation_name_ja, '理学部$', '')
+          WHEN main_affiliation_name_ja LIKE '%文学部' THEN REGEXP_REPLACE(main_affiliation_name_ja, '文学部$', '')
+          WHEN main_affiliation_name_ja LIKE '%法学部' THEN REGEXP_REPLACE(main_affiliation_name_ja, '法学部$', '')
+          WHEN main_affiliation_name_ja LIKE '%経済学部' THEN REGEXP_REPLACE(main_affiliation_name_ja, '経済学部$', '')
+          WHEN main_affiliation_name_ja LIKE '%学部' THEN REGEXP_REPLACE(main_affiliation_name_ja, '学部$', '')
+          
+          -- 研究所・機関系
+          WHEN main_affiliation_name_ja LIKE '%史料編纂所' THEN REGEXP_REPLACE(main_affiliation_name_ja, '史料編纂所$', '')
           WHEN main_affiliation_name_ja LIKE '%総合研究博物館' THEN REGEXP_REPLACE(main_affiliation_name_ja, '総合研究博物館$', '')
+          WHEN main_affiliation_name_ja LIKE '%核物理研究センター' THEN REGEXP_REPLACE(main_affiliation_name_ja, '核物理研究センター$', '')
+          WHEN main_affiliation_name_ja LIKE '%金属材料研究所' THEN REGEXP_REPLACE(main_affiliation_name_ja, '金属材料研究所$', '')
+          WHEN main_affiliation_name_ja LIKE '%研究所' THEN REGEXP_REPLACE(main_affiliation_name_ja, '研究所$', '')
+          WHEN main_affiliation_name_ja LIKE '%センター' THEN REGEXP_REPLACE(main_affiliation_name_ja, 'センター$', '')
+          
+          -- 病院系
+          WHEN main_affiliation_name_ja LIKE '%附属病院' THEN REGEXP_REPLACE(main_affiliation_name_ja, '附属病院$', '')
           WHEN main_affiliation_name_ja LIKE '%病院' THEN REGEXP_REPLACE(main_affiliation_name_ja, '病院$', '')
+          
+          -- その他（最後に処理）
           WHEN main_affiliation_name_ja LIKE '%大学院' THEN REGEXP_REPLACE(main_affiliation_name_ja, '大学院$', '')
+          
           ELSE main_affiliation_name_ja
         END as university_name,
         name_ja,
