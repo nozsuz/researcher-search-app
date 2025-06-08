@@ -176,7 +176,8 @@ async def health_check():
 
 def get_simple_university_query(table_name: str) -> str:
     """
-    完全統合対応の大学統計クエリ - 東京科学大学統合とクリーンな大学名抽出
+    完全統合対応の大学統計クエリ - BigQuery安全版
+    複雑な正規表現を避け、シンプルなパターンマッチングで実現
     """
     return f"""
     WITH base_data AS (
@@ -198,25 +199,63 @@ def get_simple_university_query(table_name: str) -> str:
           -- 【国立大学法人処理】"国立大学法人〇〇大学" → "〇〇大学"
           WHEN main_affiliation_name_ja LIKE '国立大学法人%' THEN
             CASE 
-              WHEN REGEXP_REPLACE(main_affiliation_name_ja, '^国立大学法人\\s*', '') LIKE '%東京工業大学%' THEN '東京科学大学'
-              WHEN REGEXP_REPLACE(main_affiliation_name_ja, '^国立大学法人\\s*', '') LIKE '%東京医科歯科大学%' THEN '東京科学大学'
-              ELSE
-                REGEXP_EXTRACT(
-                  REGEXP_REPLACE(main_affiliation_name_ja, '^国立大学法人\\s*', ''),
-                  r'([^\\s\\u3000]+大学)(?!院|病院|研究|附属|センター|機構)'
-                )
+              -- 国立大学法人内でも東京科学統合をチェック
+              WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
+              WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
+              -- 一般的な国立大学法人処理
+              WHEN main_affiliation_name_ja LIKE '国立大学法人東京大学%' THEN '東京大学'
+              WHEN main_affiliation_name_ja LIKE '国立大学法人京都大学%' THEN '京都大学'
+              WHEN main_affiliation_name_ja LIKE '国立大学法人大阪大学%' THEN '大阪大学'
+              WHEN main_affiliation_name_ja LIKE '国立大学法人北海道大学%' THEN '北海道大学'
+              WHEN main_affiliation_name_ja LIKE '国立大学法人東北大学%' THEN '東北大学'
+              WHEN main_affiliation_name_ja LIKE '国立大学法人九州大学%' THEN '九州大学'
+              WHEN main_affiliation_name_ja LIKE '国立大学法人筑波大学%' THEN '筑波大学'
+              WHEN main_affiliation_name_ja LIKE '国立大学法人名古屋大学%' THEN '名古屋大学'
+              WHEN main_affiliation_name_ja LIKE '国立大学法人東京科学大学%' THEN '東京科学大学'
+              -- その他の国立大学法人
+              ELSE REGEXP_REPLACE(main_affiliation_name_ja, '国立大学法人', '')
             END
           
-          -- 【通常の大学名抽出】附属機関を除外して親大学名のみ抽出
-          ELSE 
-            REGEXP_EXTRACT(
-              main_affiliation_name_ja, 
-              r'([^\\s\\u3000]+大学)(?!院|病院|研究|附属|センター|機構|学部|学科)'
-            )
-        END as university_name,
+          -- 【通常の大学名抽出】シンプルなパターンマッチング
+          ELSE main_affiliation_name_ja
+        END as university_name_raw,
         name_ja,
         main_affiliation_name_ja as original_name
       FROM base_data
+    ),
+    
+    extracted_universities AS (
+      SELECT
+        CASE
+          -- 大学名の精密抽出（附属機関を除外）
+          WHEN university_name_raw LIKE '%大学院%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学院.*', '大学'))
+          WHEN university_name_raw LIKE '%大学病院%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学病院.*', '大学'))
+          WHEN university_name_raw LIKE '%大学研究%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学研究.*', '大学'))
+          WHEN university_name_raw LIKE '%大学附属%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学附属.*', '大学'))
+          WHEN university_name_raw LIKE '%大学センター%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学センター.*', '大学'))
+          WHEN university_name_raw LIKE '%大学機構%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学機構.*', '大学'))
+          WHEN university_name_raw LIKE '%大学学部%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学学部.*', '大学'))
+          WHEN university_name_raw LIKE '%大学学科%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学学科.*', '大学'))
+          -- その他のパターン処理
+          WHEN university_name_raw LIKE '%大学医学%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学医学.*', '大学'))
+          WHEN university_name_raw LIKE '%大学法学%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学法学.*', '大学'))
+          WHEN university_name_raw LIKE '%大学工学%' THEN 
+            TRIM(REGEXP_REPLACE(university_name_raw, '大学工学.*', '大学'))
+          ELSE university_name_raw
+        END as university_name,
+        name_ja,
+        original_name
+      FROM clean_universities
     ),
     
     validated_universities AS (
@@ -224,7 +263,7 @@ def get_simple_university_query(table_name: str) -> str:
         university_name,
         name_ja,
         original_name
-      FROM clean_universities
+      FROM extracted_universities
       WHERE university_name IS NOT NULL
         AND university_name != ''
         AND university_name LIKE '%大学'
@@ -235,6 +274,9 @@ def get_simple_university_query(table_name: str) -> str:
         AND LENGTH(university_name) <= 15
         -- 異常パターンの除外
         AND university_name NOT IN ('', '大学', '国立大学', '私立大学', '公立大学')
+        -- 　（全角スペース）や不適切な文字を除外
+        AND university_name NOT LIKE '%　%'
+        AND university_name NOT LIKE '% %'  -- 空白文字あり
     )
     
     SELECT 
@@ -352,14 +394,14 @@ async def get_universities():
                 "total_universities": len(universities),
                 "universities": universities,
                 "normalization_info": {
-                    "method": "complete_university_integration_v4",
+                    "method": "complete_university_integration_v4_safe",
                     "rules": [
                         "🔗 東京科学大学統合: 東京工業大学 + 東京医科歯科大学 + 東京科学大学",
                         "🏛️ 国立大学法人の除去と統合処理",
                         "🧹 附属機関除外: 大学院・病院・研究科・センター等を親大学に統合",
                         "✂️ 異常パターン除外: 重複・空文字・短すぎる名前",
                         "📏 長さ制限: 3-15文字の適切な大学名のみ",
-                        "🔍 負の先読み正規表現で確実な親大学名抽出"
+                        "🔒 BigQuery安全版: 正規表現の問題を回避したシンプルなパターンマッチング"
                     ],
                     "consolidated_universities": len(normalization_details),
                     "details": normalization_details[:10],
@@ -376,6 +418,11 @@ async def get_universities():
                     "valid_universities": len(universities),
                     "merged_universities": len([u for u in universities if u.get("is_merged")]),
                     "query_length": len(query)
+                },
+                "debug_info": {
+                    "bigquery_client_type": str(type(bq_client)),
+                    "table_name": BIGQUERY_TABLE,
+                    "gcp_status": gcp_status
                 }
             }
             
@@ -393,6 +440,11 @@ async def get_universities():
             logger.error(f"❌ BigQueryクエリ実行エラー: {e}")
             import traceback
             logger.error(f"📋 エラーの詳細: {traceback.format_exc()}")
+            
+            # クエリエラーの場合、クエリ内容をログ出力
+            if 'query' in locals():
+                logger.error(f"🔎 エラー発生クエリ: {query}")
+            
             return await get_universities_fallback("bigquery_execution_error", str(e))
             
     except Exception as e:
