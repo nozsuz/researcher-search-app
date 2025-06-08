@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Railway API診断ツール</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+        }
+        .container {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.success {
+            background-color: #1e4620;
+            color: #4caf50;
+            border: 1px solid #2e7d32;
+        }
+        .status.error {
+            background-color: #4a1e1e;
+            color: #f44336;
+            border: 1px solid #d32f2f;
+        }
+        .status.warning {
+            background-color: #4a3f1e;
+            color: #ff9800;
+            border: 1px solid #f57c00;
+        }
+        .status.info {
+            background-color: #1e3a4a;
+            color: #2196f3;
+            border: 1px solid #1976d2;
+        }
+        button {
+            background-color: #6c5ce7;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #5f3dc4;
+        }
+        .output {
+            background-color: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            font-family: 'Consolas', 'Monaco', monospace;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        input[type="text"] {
+            width: 400px;
+            padding: 8px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            margin: 5px;
+            background-color: #333;
+            color: #e0e0e0;
+        }
+        input[type="text"]::placeholder {
+            color: #999;
+        }
+        .url-list {
+            background-color: #2a2a2a;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .url-item {
+            margin: 5px 0;
+            padding: 5px;
+            background-color: #333;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .url-item:hover {
+            background-color: #444;
+        }
+        h1, h2 {
+            color: #6c5ce7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Railway API 診断ツール</h1>
+        
+        <div class="status info">
+            <strong>📡 Railway デプロイメント診断</strong><br>
+            RailwayでデプロイされたAPIの状況を確認します
+        </div>
+
+        <h2>🔗 API URL設定</h2>
+        <div>
+            <label>Railway API URL:</label><br>
+            <input type="text" id="railwayUrl" placeholder="https://your-project.up.railway.app" style="width: 500px;">
+            <button onclick="updateUrl()">URL設定</button>
+        </div>
+
+        <div class="url-list">
+            <strong>よくあるRailway URL形式:</strong>
+            <div class="url-item" onclick="setUrl('https://researcher-search-app.up.railway.app')">
+                https://researcher-search-app.up.railway.app
+            </div>
+            <div class="url-item" onclick="setUrl('https://researcher-search.up.railway.app')">
+                https://researcher-search.up.railway.app
+            </div>
+            <div class="url-item" onclick="setUrl('https://main-production-xxxx.up.railway.app')">
+                https://main-production-xxxx.up.railway.app
+            </div>
+        </div>
+        
+        <h2>🔍 診断テスト</h2>
+        <div>
+            <button onclick="testBasicConnection()">🌐 基本接続テスト</button>
+            <button onclick="testHealth()">❤️ ヘルスチェック</button>
+            <button onclick="testUniversities()">🏫 大学APIテスト</button>
+            <button onclick="testSearch()">🔍 検索APIテスト</button>
+            <button onclick="runFullDiagnostic()">🔧 完全診断</button>
+        </div>
+
+        <div id="status" class="status"></div>
+        <div id="output" class="output"></div>
+
+        <h2>📋 デプロイメント確認項目</h2>
+        <div class="status warning">
+            <strong>Railway Dashboard で確認すべき項目:</strong><br>
+            1. 最新のデプロイメントが成功しているか<br>
+            2. アプリケーションがRunning状態か<br>
+            3. カスタムドメインが設定されているか<br>
+            4. 環境変数が正しく設定されているか<br>
+            5. ログにエラーがないか
+        </div>
+    </div>
+
+    <script>
+        let apiBaseUrl = '';
+
+        function updateStatus(type, message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${type}`;
+            statusDiv.innerHTML = message;
+        }
+
+        function updateOutput(content) {
+            document.getElementById('output').textContent = content;
+        }
+
+        function setUrl(url) {
+            document.getElementById('railwayUrl').value = url;
+            updateUrl();
+        }
+
+        function updateUrl() {
+            apiBaseUrl = document.getElementById('railwayUrl').value.trim();
+            if (!apiBaseUrl) {
+                updateStatus('error', '❌ URLを入力してください');
+                return;
+            }
+            if (!apiBaseUrl.startsWith('http')) {
+                apiBaseUrl = 'https://' + apiBaseUrl;
+                document.getElementById('railwayUrl').value = apiBaseUrl;
+            }
+            updateStatus('info', `🔗 API URL設定: ${apiBaseUrl}`);
+        }
+
+        async function testBasicConnection() {
+            if (!apiBaseUrl) {
+                updateStatus('error', '❌ まずAPI URLを設定してください');
+                return;
+            }
+
+            updateStatus('warning', '🌐 基本接続テスト中...');
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
+
+                const response = await fetch(`${apiBaseUrl}/`, {
+                    signal: controller.signal,
+                    headers: {
+                        'Accept': 'application/json',
+                    }
+                });
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('success', `✅ 基本接続成功! (${response.status})`);
+                    updateOutput(JSON.stringify(data, null, 2));
+                } else {
+                    updateStatus('error', `❌ HTTP エラー: ${response.status} ${response.statusText}`);
+                    const text = await response.text();
+                    updateOutput(`Status: ${response.status}\nResponse: ${text}`);
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    updateStatus('error', '❌ 接続タイムアウト (10秒)');
+                    updateOutput('接続がタイムアウトしました。Railwayのデプロイメントが停止している可能性があります。');
+                } else {
+                    updateStatus('error', `❌ 接続エラー: ${error.message}`);
+                    updateOutput(`Error: ${error.toString()}\n\n考えられる原因:\n1. Railway URLが間違っている\n2. デプロイメントが失敗している\n3. アプリケーションが停止している\n4. ネットワークの問題`);
+                }
+            }
+        }
+
+        async function testHealth() {
+            if (!apiBaseUrl) {
+                updateStatus('error', '❌ まずAPI URLを設定してください');
+                return;
+            }
+
+            updateStatus('warning', '❤️ ヘルスチェック中...');
+            try {
+                const response = await fetch(`${apiBaseUrl}/health`);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('success', '✅ ヘルスチェック成功');
+                    updateOutput(JSON.stringify(data, null, 2));
+                } else {
+                    updateStatus('error', `❌ ヘルスチェック失敗: ${response.status}`);
+                    updateOutput(`Status: ${response.status} ${response.statusText}`);
+                }
+            } catch (error) {
+                updateStatus('error', `❌ ヘルスチェックエラー: ${error.message}`);
+                updateOutput(`Error: ${error.toString()}`);
+            }
+        }
+
+        async function testUniversities() {
+            if (!apiBaseUrl) {
+                updateStatus('error', '❌ まずAPI URLを設定してください');
+                return;
+            }
+
+            updateStatus('warning', '🏫 大学APIテスト中...');
+            try {
+                const response = await fetch(`${apiBaseUrl}/api/universities`);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('success', `✅ 大学API成功: ${data.total_universities || 0}校取得`);
+                    updateOutput(JSON.stringify(data, null, 2));
+                } else {
+                    updateStatus('error', `❌ 大学API失敗: ${response.status}`);
+                    updateOutput(`Status: ${response.status} ${response.statusText}`);
+                }
+            } catch (error) {
+                updateStatus('error', `❌ 大学APIエラー: ${error.message}`);
+                updateOutput(`Error: ${error.toString()}`);
+            }
+        }
+
+        async function testSearch() {
+            if (!apiBaseUrl) {
+                updateStatus('error', '❌ まずAPI URLを設定してください');
+                return;
+            }
+
+            updateStatus('warning', '🔍 検索APIテスト中...');
+            try {
+                const response = await fetch(`${apiBaseUrl}/api/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: 'テスト',
+                        method: 'keyword',
+                        max_results: 2
+                    })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('success', `✅ 検索API成功: ${data.total || 0}件取得`);
+                    updateOutput(JSON.stringify(data, null, 2));
+                } else {
+                    updateStatus('error', `❌ 検索API失敗: ${response.status}`);
+                    updateOutput(`Status: ${response.status} ${response.statusText}`);
+                }
+            } catch (error) {
+                updateStatus('error', `❌ 検索APIエラー: ${error.message}`);
+                updateOutput(`Error: ${error.toString()}`);
+            }
+        }
+
+        async function runFullDiagnostic() {
+            updateStatus('warning', '🔧 完全診断を実行中...');
+            updateOutput('完全診断を開始します...\n\n');
+
+            // 1. 基本接続
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await testBasicConnection();
+            
+            // 2. ヘルスチェック
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await testHealth();
+            
+            // 3. 大学API
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await testUniversities();
+            
+            // 4. 検索API
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await testSearch();
+            
+            updateStatus('info', '🔧 完全診断完了 - 上記の結果を確認してください');
+        }
+
+        // 一般的なRailway URLを試す関数
+        async function autoDetectUrl() {
+            const commonUrls = [
+                'https://researcher-search-app.up.railway.app',
+                'https://researcher-search.up.railway.app',
+                'https://main-production.up.railway.app'
+            ];
+
+            updateStatus('warning', '🔍 Railway URL自動検出中...');
+            
+            for (let url of commonUrls) {
+                try {
+                    const response = await fetch(`${url}/`, { 
+                        method: 'HEAD',
+                        signal: AbortSignal.timeout(5000)
+                    });
+                    if (response.ok) {
+                        setUrl(url);
+                        updateStatus('success', `✅ 自動検出成功: ${url}`);
+                        return;
+                    }
+                } catch (error) {
+                    // 次のURLを試す
+                }
+            }
+            
+            updateStatus('error', '❌ 自動検出失敗 - 手動でURLを入力してください');
+        }
+
+        // ページ読み込み時の処理
+        window.addEventListener('load', function() {
+            updateStatus('info', 'Railway API URLを入力して診断を開始してください');
+        });
+    </script>
+</body>
+</html>

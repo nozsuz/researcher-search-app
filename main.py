@@ -5,7 +5,8 @@
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import pandas as pd
 import os
@@ -116,18 +117,64 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    """ヘルスチェックエンドポイント"""
+    """ルートエンドポイント"""
     return {
         "message": "🚀 研究者検索API v2.0 サーバー稼働中",
         "status": "healthy",
         "timestamp": time.time(),
         "version": "2.0.0",
+        "endpoints": {
+            "/health": "ヘルスチェック",
+            "/api/universities": "大学リスト",
+            "/api/search": "研究者検索",
+            "/test_api.html": "テストツール"
+        },
         "features": {
-            "basic_api": "✅ 利用可能",
-            "search_api": "✅ 実際検索可能" if clients["initialized"] else "🔄 準備中",
+            "search_api": "✅ 利用可能" if clients["initialized"] else "🔄 準備中",
             "gcp_integration": "✅ 準備完了" if clients["initialized"] else "🔄 準備中"
         }
     }
+
+@app.get("/test_api.html")
+async def test_api_page():
+    """テストAPIページ"""
+    return FileResponse("test_api.html")
+
+@app.get("/health")
+async def health_check():
+    """詳細なヘルスチェック"""
+    
+    # GCPステータスを取得
+    try:
+        from gcp_auth import get_gcp_status
+        gcp_status = get_gcp_status()
+    except Exception as e:
+        gcp_status = {"error": str(e)}
+    
+    health_status = {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "server_info": {
+            "version": "2.0.0",
+            "project_id": PROJECT_ID,
+            "location": LOCATION
+        },
+        "clients_status": {
+            "initialized": clients["initialized"],
+            "bigquery": "✅ 準備完了" if gcp_status.get("bigquery_ready") else "🔄 準備中",
+            "vertex_ai": "✅ 準備完了" if gcp_status.get("vertex_ai_ready") else "🔄 準備中",
+            "credentials": "✅ 設定済" if gcp_status.get("credentials_available") else "❌ 未設定"
+        },
+        "endpoints": {
+            "/": "✅ 利用可能",
+            "/health": "✅ 利用可能",
+            "/api/search": "✅ 実際検索可能" if clients["initialized"] else "🔄 準備中（モック応答あり）",
+            "/api/universities": "✅ 利用可能",
+            "/test_api.html": "✅ 利用可能"
+        },
+        "gcp_details": gcp_status
+    }
+    return health_status
 
 @app.get("/api/universities")
 async def get_universities():

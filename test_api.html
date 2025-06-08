@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>研究者検索API - テスト</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .output {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        input[type="text"] {
+            width: 300px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔬 研究者検索API テストツール</h1>
+        
+        <div class="status warning">
+            <strong>⚠️ 注意:</strong> APIサーバーが起動していることを確認してください
+        </div>
+
+        <h2>📊 サーバー状態確認</h2>
+        <div>
+            <label>API Base URL:</label>
+            <input type="text" id="apiBaseUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
+            <button onclick="updateApiUrl()">URL更新</button>
+        </div>
+        
+        <div>
+            <button onclick="testConnection()">🔗 接続テスト</button>
+            <button onclick="testHealth()">❤️ ヘルスチェック</button>
+            <button onclick="testUniversities()">🏫 大学リスト</button>
+            <button onclick="testSearch()">🔍 検索テスト</button>
+        </div>
+
+        <div id="status" class="status"></div>
+        <div id="output" class="output"></div>
+
+        <h2>🔍 研究者検索</h2>
+        <div>
+            <input type="text" id="searchQuery" placeholder="検索キーワード" value="人工知能">
+            <select id="searchMethod">
+                <option value="keyword">キーワード検索</option>
+                <option value="semantic">セマンティック検索</option>
+            </select>
+            <button onclick="performSearch()">検索実行</button>
+        </div>
+
+        <div id="searchResults" class="output"></div>
+    </div>
+
+    <script>
+        let apiBaseUrl = 'http://localhost:8000';
+
+        function updateApiUrl() {
+            apiBaseUrl = document.getElementById('apiBaseUrl').value;
+            updateStatus('info', `API URL更新: ${apiBaseUrl}`);
+        }
+
+        function updateStatus(type, message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${type}`;
+            statusDiv.innerHTML = message;
+        }
+
+        function updateOutput(content) {
+            document.getElementById('output').textContent = content;
+        }
+
+        async function testConnection() {
+            updateStatus('warning', '接続テスト中...');
+            try {
+                const response = await fetch(`${apiBaseUrl}/`);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('success', '✅ 接続成功');
+                    updateOutput(JSON.stringify(data, null, 2));
+                } else {
+                    updateStatus('error', `❌ 接続失敗: HTTP ${response.status}`);
+                    updateOutput(`Status: ${response.status} ${response.statusText}`);
+                }
+            } catch (error) {
+                updateStatus('error', `❌ 接続エラー: ${error.message}`);
+                updateOutput(`Error: ${error.toString()}\n\n考えられる原因:\n1. サーバーが起動していない\n2. ポート番号が違う\n3. CORS設定の問題`);
+            }
+        }
+
+        async function testHealth() {
+            updateStatus('warning', 'ヘルスチェック中...');
+            try {
+                const response = await fetch(`${apiBaseUrl}/health`);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('success', '✅ ヘルスチェック成功');
+                    updateOutput(JSON.stringify(data, null, 2));
+                } else {
+                    updateStatus('error', `❌ ヘルスチェック失敗: HTTP ${response.status}`);
+                    updateOutput(`Status: ${response.status} ${response.statusText}`);
+                }
+            } catch (error) {
+                updateStatus('error', `❌ ヘルスチェックエラー: ${error.message}`);
+                updateOutput(`Error: ${error.toString()}`);
+            }
+        }
+
+        async function testUniversities() {
+            updateStatus('warning', '大学リスト取得中...');
+            try {
+                const response = await fetch(`${apiBaseUrl}/api/universities`);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('success', `✅ 大学リスト取得成功: ${data.total_universities}校`);
+                    updateOutput(JSON.stringify(data, null, 2));
+                } else {
+                    updateStatus('error', `❌ 大学リスト取得失敗: HTTP ${response.status}`);
+                    updateOutput(`Status: ${response.status} ${response.statusText}`);
+                }
+            } catch (error) {
+                updateStatus('error', `❌ 大学リスト取得エラー: ${error.message}`);
+                updateOutput(`Error: ${error.toString()}`);
+            }
+        }
+
+        async function testSearch() {
+            updateStatus('warning', '検索テスト中...');
+            try {
+                const response = await fetch(`${apiBaseUrl}/api/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: '機械学習',
+                        method: 'keyword',
+                        max_results: 2
+                    })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('success', `✅ 検索テスト成功: ${data.total}件`);
+                    updateOutput(JSON.stringify(data, null, 2));
+                } else {
+                    updateStatus('error', `❌ 検索テスト失敗: HTTP ${response.status}`);
+                    updateOutput(`Status: ${response.status} ${response.statusText}`);
+                }
+            } catch (error) {
+                updateStatus('error', `❌ 検索テストエラー: ${error.message}`);
+                updateOutput(`Error: ${error.toString()}`);
+            }
+        }
+
+        async function performSearch() {
+            const query = document.getElementById('searchQuery').value;
+            const method = document.getElementById('searchMethod').value;
+            
+            if (!query.trim()) {
+                updateStatus('error', '❌ 検索キーワードを入力してください');
+                return;
+            }
+
+            updateStatus('warning', `検索中: "${query}" (${method})`);
+            
+            try {
+                const response = await fetch(`${apiBaseUrl}/api/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        method: method,
+                        max_results: 5
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('success', `✅ 検索完了: ${data.total}件 (${data.execution_time.toFixed(2)}秒)`);
+                    
+                    // 検索結果を整形して表示
+                    let resultText = `検索結果: ${data.total}件\n`;
+                    resultText += `実行時間: ${data.execution_time.toFixed(2)}秒\n`;
+                    resultText += `検索方法: ${data.method}\n\n`;
+                    
+                    if (data.results && data.results.length > 0) {
+                        data.results.forEach((result, index) => {
+                            resultText += `${index + 1}. ${result.name_ja || '名前不明'}\n`;
+                            resultText += `   所属: ${result.main_affiliation_name_ja || '所属不明'}\n`;
+                            resultText += `   キーワード: ${result.research_keywords_ja || 'なし'}\n`;
+                            if (result.relevance_score) {
+                                resultText += `   関連度: ${result.relevance_score}\n`;
+                            }
+                            if (result.distance) {
+                                resultText += `   距離: ${result.distance.toFixed(4)}\n`;
+                            }
+                            resultText += '\n';
+                        });
+                    } else {
+                        resultText += '検索結果がありません。\n';
+                    }
+                    
+                    document.getElementById('searchResults').textContent = resultText;
+                } else {
+                    updateStatus('error', `❌ 検索失敗: HTTP ${response.status}`);
+                    document.getElementById('searchResults').textContent = `Error: ${response.status} ${response.statusText}`;
+                }
+            } catch (error) {
+                updateStatus('error', `❌ 検索エラー: ${error.message}`);
+                document.getElementById('searchResults').textContent = `Error: ${error.toString()}`;
+            }
+        }
+
+        // ページ読み込み時に自動で接続テスト
+        window.addEventListener('load', function() {
+            setTimeout(testConnection, 1000);
+        });
+    </script>
+</body>
+</html>
