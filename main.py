@@ -569,63 +569,64 @@ async def get_universities():
                 SELECT DISTINCT
                     name_ja,
                     main_affiliation_name_ja,
-                    -- 大学名の正規化（修正版）
+                    -- 大学名の正規化（確実な方法）
                     CASE 
-                        -- 特別なケースの処理（混同を避けるため）
+                        -- 特別なケースの処理
                         WHEN main_affiliation_name_ja IN ('南九州大学', '西九州大学', '北九州大学') THEN main_affiliation_name_ja
                         
-                        -- 慶應/慶応の表記揺れ対応
+                        -- 東京大学系
+                        WHEN main_affiliation_name_ja LIKE '%東京大学%' THEN '東京大学'
+                        -- 京都大学系  
+                        WHEN main_affiliation_name_ja LIKE '%京都大学%' THEN '京都大学'
+                        -- 大阪大学系
+                        WHEN main_affiliation_name_ja LIKE '%大阪大学%' THEN '大阪大学'
+                        -- 北海道大学系
+                        WHEN main_affiliation_name_ja LIKE '%北海道大学%' THEN '北海道大学'
+                        -- 東北大学系
+                        WHEN main_affiliation_name_ja LIKE '%東北大学%' THEN '東北大学'
+                        -- 九州大学系（他の九州系大学を除外）
+                        WHEN main_affiliation_name_ja LIKE '%九州大学%' 
+                             AND main_affiliation_name_ja NOT LIKE '%南九州大学%' 
+                             AND main_affiliation_name_ja NOT LIKE '%西九州大学%' 
+                             AND main_affiliation_name_ja NOT LIKE '%北九州大学%' THEN '九州大学'
+                        -- 名古屋大学系
+                        WHEN main_affiliation_name_ja LIKE '%名古屋大学%' THEN '名古屋大学'
+                        -- 筑波大学系
+                        WHEN main_affiliation_name_ja LIKE '%筑波大学%' THEN '筑波大学'
+                        -- 東京工業大学系
+                        WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京工業大学'
+                        -- 東京科学大学系（東工大と東京医科歯科大の統合）
+                        WHEN main_affiliation_name_ja LIKE '%東京科学大学%' THEN '東京科学大学'
+                        -- 東京医科歯科大学系
+                        WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京医科歯科大学'
+                        -- 慶應義塾大学系
                         WHEN main_affiliation_name_ja LIKE '%慶應義塾大学%' OR main_affiliation_name_ja LIKE '%慶応義塾大学%' THEN '慶應義塾大学'
+                        -- 早稲田大学系
+                        WHEN main_affiliation_name_ja LIKE '%早稲田大学%' THEN '早稲田大学'
+                        -- 神戸大学系
+                        WHEN main_affiliation_name_ja LIKE '%神戸大学%' THEN '神戸大学'
+                        -- 広島大学系
+                        WHEN main_affiliation_name_ja LIKE '%広島大学%' THEN '広島大学'
+                        -- 岡山大学系
+                        WHEN main_affiliation_name_ja LIKE '%岡山大学%' THEN '岡山大学'
+                        -- 金沢大学系
+                        WHEN main_affiliation_name_ja LIKE '%金沢大学%' THEN '金沢大学'
+                        -- 新潟大学系
+                        WHEN main_affiliation_name_ja LIKE '%新潟大学%' THEN '新潟大学'
+                        -- 千葉大学系
+                        WHEN main_affiliation_name_ja LIKE '%千葉大学%' THEN '千葉大学'
+                        -- 横浜国立大学系
+                        WHEN main_affiliation_name_ja LIKE '%横浜国立大学%' THEN '横浜国立大学'
+                        -- 信州大学系
+                        WHEN main_affiliation_name_ja LIKE '%信州大学%' THEN '信州大学'
+                        -- 山形大学系
+                        WHEN main_affiliation_name_ja LIKE '%山形大学%' THEN '山形大学'
+                        -- 群馬大学系
+                        WHEN main_affiliation_name_ja LIKE '%群馬大学%' THEN '群馬大学'
+                        -- 【追加】東大阪大学系（誤って東京大学に含めないように）
+                        WHEN main_affiliation_name_ja LIKE '%東大阪大学%' THEN '東大阪大学'
                         
-                        -- 汎用的な大学名正規化（正規表現で正確に抽出）
-                        WHEN main_affiliation_name_ja LIKE '%大学%' THEN
-                            CASE
-                                -- パターン1: 「○○大学大学院」→「○○大学」
-                                WHEN main_affiliation_name_ja LIKE '%大学大学院%' THEN
-                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
-                                
-                                -- パターン2: 「○○大学病院」→「○○大学」
-                                WHEN main_affiliation_name_ja LIKE '%大学病院%' THEN
-                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
-                                
-                                -- パターン3: 「○○大学附属病院」→「○○大学」
-                                WHEN main_affiliation_name_ja LIKE '%大学附属病院%' THEN
-                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
-                                
-                                -- パターン4: 「○○大学医学部附属病院」→「○○大学」
-                                WHEN main_affiliation_name_ja LIKE '%大学医学部附属病院%' THEN
-                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
-                                
-                                -- パターン5: 学部パターン
-                                WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'大学[医工理農法経文教薬歯看]学部') THEN
-                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
-                                
-                                -- パターン6: 研究科パターン
-                                WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'大学[医工理農法経文教薬歯]学系研究科') THEN
-                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
-                                
-                                WHEN REGEXP_CONTAINS(main_affiliation_name_ja, r'大学.*研究科') THEN
-                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
-                                
-                                -- パターン7: 「○○大学研究所」「○○大学センター」など
-                                WHEN main_affiliation_name_ja LIKE '%大学研究所%' OR 
-                                     main_affiliation_name_ja LIKE '%大学センター%' OR
-                                     main_affiliation_name_ja LIKE '%大学機構%' THEN
-                                    REGEXP_EXTRACT(main_affiliation_name_ja, r'^(.*?大学)')
-                                
-                                -- パターン8: 大学院大学（独立した大学院）はそのまま保持
-                                WHEN main_affiliation_name_ja LIKE '%大学院大学%' THEN
-                                    main_affiliation_name_ja
-                                
-                                -- パターン9: その他の「大学院○○」パターン（○○大学大学院以外）
-                                WHEN main_affiliation_name_ja LIKE '大学院%' AND NOT main_affiliation_name_ja LIKE '%大学大学院%' THEN
-                                    main_affiliation_name_ja
-                                
-                                -- その他の大学関連はそのまま
-                                ELSE main_affiliation_name_ja
-                            END
-                        
-                        -- 大学以外の機関はそのまま
+                        -- その他はそのまま
                         ELSE main_affiliation_name_ja
                     END as normalized_university_name
                 FROM `{BIGQUERY_TABLE}`
