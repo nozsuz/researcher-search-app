@@ -563,13 +563,31 @@ async def get_universities():
         
         if bq_client:
             # BigQueryから大学名と研究者数を取得
+            # 同一大学の表記揺れを考慮した集計
             query = f"""
+            WITH university_names AS (
+                SELECT DISTINCT
+                    name_ja,
+                    name_en,
+                    main_affiliation_name_ja,
+                    main_affiliation_name_en,
+                    CASE 
+                        -- ここで同一大学の名前を統一
+                        WHEN main_affiliation_name_ja IN ('南九州大学', '西九州大学') THEN main_affiliation_name_ja
+                        WHEN main_affiliation_name_ja IS NOT NULL THEN main_affiliation_name_ja
+                        WHEN main_affiliation_name_en IS NOT NULL THEN main_affiliation_name_en
+                        ELSE 'Unknown'
+                    END as unified_university_name
+                FROM `{BIGQUERY_TABLE}`
+                WHERE main_affiliation_name_ja IS NOT NULL 
+                   OR main_affiliation_name_en IS NOT NULL
+            )
             SELECT 
-                main_affiliation_name_ja as university_name,
-                COUNT(*) as researcher_count
-            FROM `{BIGQUERY_TABLE}`
-            WHERE main_affiliation_name_ja IS NOT NULL
-            GROUP BY main_affiliation_name_ja
+                unified_university_name as university_name,
+                COUNT(DISTINCT name_ja) as researcher_count
+            FROM university_names
+            WHERE unified_university_name != 'Unknown'
+            GROUP BY unified_university_name
             ORDER BY researcher_count DESC
             """
             
