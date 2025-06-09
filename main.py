@@ -15,6 +15,15 @@ import asyncio
 from typing import List, Optional, Dict, Any
 import logging
 
+# 新しいインポートを追加
+from project_manager import (
+    project_manager, 
+    ProjectCreateRequest, 
+    ResearcherSelectionRequest, 
+    MatchingRequest,
+    TempProject
+)
+
 # ロギング設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,7 +32,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="研究者検索API",
     description="AI研究者検索システムのAPIエンドポイント",
-    version="2.0.3"
+    version="2.1.0"
 )
 
 # CORS設定
@@ -130,21 +139,24 @@ async def startup_event():
 async def root():
     """ルートエンドポイント"""
     return {
-        "message": "🚀 研究者検索API v2.0.3 サーバー稼働中（ResearchMap分析対応）",
+        "message": "🚀 研究者検索API v2.1.0 サーバー稼働中（プロジェクト管理統合版）",
         "status": "healthy",
         "timestamp": time.time(),
-        "version": "2.0.3",
+        "version": "2.1.0",
         "endpoints": {
             "/health": "ヘルスチェック",
             "/api/universities": "大学リスト",
             "/api/search": "研究者検索",
             "/api/analyze-researcher": "研究者詳細分析",
+            "/api/temp-projects": "仮プロジェクト管理",
             "/test_api.html": "テストツール"
         },
         "features": {
             "search_api": "✅ 利用可能" if clients["initialized"] else "🔄 準備中",
             "gcp_integration": "✅ 準備完了" if clients["initialized"] else "🔄 準備中",
-            "researchmap_analysis": "✅ 利用可能"
+            "researchmap_analysis": "✅ 利用可能",
+            "project_management": "✅ 利用可能",
+            "matching_system": "✅ 利用可能"
         }
     }
 
@@ -166,7 +178,7 @@ async def health_check():
         "status": "healthy",
         "timestamp": time.time(),
         "server_info": {
-            "version": "2.0.3",
+            "version": "2.1.0",
             "project_id": PROJECT_ID,
             "location": LOCATION
         },
@@ -182,6 +194,7 @@ async def health_check():
             "/api/search": "✅ 実際検索可能" if clients["initialized"] else "🔄 準備中（モック応答あり）",
             "/api/universities": "✅ 利用可能",
             "/api/analyze-researcher": "✅ ResearchMap分析可能",
+            "/api/temp-projects": "✅ プロジェクト管理可能",
             "/test_api.html": "✅ 利用可能"
         },
         "gcp_details": gcp_status
@@ -711,6 +724,160 @@ async def analyze_researcher(request: AnalyzeRequest):
             analysis=None
         )
 
+# =============================================================================
+# プロジェクト管理API エンドポイント
+# =============================================================================
+
+@app.post("/api/temp-projects", response_model=TempProject)
+async def create_temp_project(request: ProjectCreateRequest):
+    """仮プロジェクトを作成"""
+    try:
+        logger.info(f"🚀 仮プロジェクト作成リクエスト: {request.name}")
+        
+        project = project_manager.create_temp_project(request)
+        
+        return project
+        
+    except Exception as e:
+        logger.error(f"❌ 仮プロジェクト作成エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"プロジェクト作成に失敗しました: {str(e)}")
+
+@app.get("/api/temp-projects")
+async def list_temp_projects(user_id: Optional[str] = Query(None)):
+    """仮プロジェクト一覧を取得"""
+    try:
+        logger.info(f"📋 仮プロジェクト一覧取得: user_id={user_id}")
+        
+        projects = project_manager.list_temp_projects(user_id)
+        
+        return {
+            "status": "success",
+            "projects": projects,
+            "total": len(projects)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ 仮プロジェクト一覧取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"プロジェクト一覧取得に失敗しました: {str(e)}")
+
+@app.get("/api/temp-projects/{project_id}")
+async def get_temp_project(project_id: str):
+    """特定の仮プロジェクトを取得"""
+    try:
+        logger.info(f"🔍 仮プロジェクト取得: {project_id}")
+        
+        project = project_manager.get_temp_project(project_id)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="プロジェクトが見つかりません")
+        
+        return {
+            "status": "success",
+            "project": project
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 仮プロジェクト取得エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"プロジェクト取得に失敗しました: {str(e)}")
+
+@app.post("/api/temp-projects/{project_id}/researchers")
+async def add_researcher_to_project(project_id: str, request: ResearcherSelectionRequest):
+    """プロジェクトに研究者を追加"""
+    try:
+        logger.info(f"👨‍🔬 研究者追加: {project_id} に {request.researcher_name}")
+        
+        researcher_data = {
+            "name": request.researcher_name,
+            "affiliation": request.researcher_affiliation,
+            "researchmap_url": request.researchmap_url,
+            "selection_reason": request.selection_reason
+        }
+        
+        success = project_manager.add_researcher_to_project(project_id, researcher_data)
+        
+        if not success:
+            raise HTTPException(status_code=400, detail="研究者の追加に失敗しました")
+        
+        return {
+            "status": "success",
+            "message": f"{request.researcher_name}をプロジェクトに追加しました"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 研究者追加エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"研究者追加に失敗しました: {str(e)}")
+
+@app.delete("/api/temp-projects/{project_id}/researchers/{researcher_name}")
+async def remove_researcher_from_project(project_id: str, researcher_name: str):
+    """プロジェクトから研究者を削除"""
+    try:
+        logger.info(f"❌ 研究者削除: {project_id} から {researcher_name}")
+        
+        success = project_manager.remove_researcher_from_project(project_id, researcher_name)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="研究者が見つかりません")
+        
+        return {
+            "status": "success",
+            "message": f"{researcher_name}をプロジェクトから削除しました"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 研究者削除エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"研究者削除に失敗しました: {str(e)}")
+
+@app.post("/api/temp-projects/{project_id}/matching-request")
+async def submit_matching_request(project_id: str, request: MatchingRequest):
+    """マッチング依頼を送信"""
+    try:
+        logger.info(f"📤 マッチング依頼: {project_id}")
+        
+        result = project_manager.submit_matching_request(project_id, request)
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        
+        return {
+            "status": "success",
+            "result": result,
+            "message": "マッチング依頼を送信しました"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ マッチング依頼エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"マッチング依頼に失敗しました: {str(e)}")
+
+@app.put("/api/temp-projects/{project_id}/status")
+async def update_project_status(project_id: str, status: str = Query(...)):
+    """プロジェクトステータスを更新"""
+    try:
+        logger.info(f"🔄 ステータス更新: {project_id} -> {status}")
+        
+        success = project_manager.update_project_status(project_id, status)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="プロジェクトが見つかりません")
+        
+        return {
+            "status": "success",
+            "message": f"プロジェクトステータスを{status}に更新しました"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ ステータス更新エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"ステータス更新に失敗しました: {str(e)}")
+
 # エラーハンドラー
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
@@ -724,18 +891,19 @@ if __name__ == "__main__":
     import uvicorn
     
     port = int(os.environ.get("PORT", 8000))
-    print(f"🚀 Starting Research API v2.0.3 (ResearchMap分析対応) on port {port}")
+    print(f"🚀 Starting Research API v2.1.0 (プロジェクト管理統合版) on port {port}")
     print("📚 利用可能なエンドポイント:")
     print("  - /api/universities (メイン - 完全統合対応大学名抽出)")
     print("  - /api/search (研究者検索)")
     print("  - /api/analyze-researcher (ResearchMap詳細分析)")
-    print("🔗 完全統合機能:")
+    print("  - /api/temp-projects (仮プロジェクト管理)")
+    print("🔗 統合機能:")
     print("   ✅ 東京科学大学統合: 東京工業 + 東京医科歯科 → 東京科学 (3,503名)")
     print("   ✅ 附属機関統合: 大学院・病院・研究科 → 親大学")
     print("   ✅ 国立大学法人除去と統合処理")
-    print("   ✅ 負の先読み正規表現で精密な大学名抽出")
-    print("   ✅ 異常パターンの完全除去とクリーンなデータ")
+    print("   ✅ プロジェクト作成からマッチング依頼までの完全ワークフロー")
     print("   ✅ ResearchMap API連携による詳細分析")
+    print("   ✅ 研究者検索からプロジェクト管理までのシームレス統合")
     
     uvicorn.run(
         "main:app",
