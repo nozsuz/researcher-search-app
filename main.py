@@ -878,6 +878,50 @@ async def update_project_status(project_id: str, status: str = Query(...)):
         logger.error(f"❌ ステータス更新エラー: {e}")
         raise HTTPException(status_code=500, detail=f"ステータス更新に失敗しました: {str(e)}")
 
+@app.put("/api/temp-projects/{project_id}/researchers/{researcher_name}/memo")
+async def update_researcher_memo(project_id: str, researcher_name: str, memo: str = Query(...)):
+    """研究者のメモを更新"""
+    try:
+        logger.info(f"📝 研究者メモ更新: {project_id} - {researcher_name}")
+        
+        success = project_manager.update_researcher_memo(project_id, researcher_name, memo)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="研究者またはプロジェクトが見つかりません")
+        
+        return {
+            "status": "success",
+            "message": f"{researcher_name}のメモを更新しました"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 研究者メモ更新エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"メモ更新に失敗しました: {str(e)}")
+
+@app.delete("/api/temp-projects/{project_id}")
+async def delete_temp_project(project_id: str):
+    """仮プロジェクトを削除"""
+    try:
+        logger.info(f"🗑️ 仮プロジェクト削除: {project_id}")
+        
+        success = project_manager.delete_temp_project(project_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="プロジェクトが見つかりません")
+        
+        return {
+            "status": "success",
+            "message": "プロジェクトを削除しました"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ プロジェクト削除エラー: {e}")
+        raise HTTPException(status_code=500, detail=f"プロジェクト削除に失敗しました: {str(e)}")
+
 # エラーハンドラー
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):

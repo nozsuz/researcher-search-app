@@ -52,6 +52,14 @@ class MatchingRequest(BaseModel):
     project_id: str
     message: str
     priority: str = "normal"  # normal, high, urgent
+    request_to_consultant: bool = False  # 専門コンサルタントへの依頼フラグ
+    consultant_requirements: Optional[str] = None  # コンサルタント要件
+
+class ResearcherMemoUpdate(BaseModel):
+    """研究者メモ更新リクエスト"""
+    project_id: str
+    researcher_name: str
+    memo: str
 
 class ProjectManager:
     """プロジェクト管理クラス"""
@@ -119,6 +127,7 @@ class ProjectManager:
             "affiliation": researcher.get("affiliation", ""),
             "researchmap_url": researcher.get("researchmap_url", ""),
             "selection_reason": researcher.get("selection_reason", ""),
+            "memo": researcher.get("memo", ""),  # メモフィールドを追加
             "added_at": datetime.now().isoformat()
         }
         
@@ -149,6 +158,28 @@ class ProjectManager:
         
         return False
     
+    def update_researcher_memo(
+        self, 
+        project_id: str, 
+        researcher_name: str, 
+        memo: str
+    ) -> bool:
+        """研究者のメモを更新"""
+        project = self.get_temp_project(project_id)
+        if not project:
+            return False
+        
+        # 研究者を検索してメモを更新
+        for researcher in project.selected_researchers:
+            if researcher.get("name") == researcher_name:
+                researcher["memo"] = memo
+                researcher["memo_updated_at"] = datetime.now().isoformat()
+                project.updated_at = datetime.now().isoformat()
+                logger.info(f"📝 研究者メモ更新: {project_id} - {researcher_name}")
+                return True
+        
+        return False
+    
     def submit_matching_request(
         self, 
         project_id: str, 
@@ -171,21 +202,31 @@ class ProjectManager:
             "project_id": project_id,
             "message": request.message,
             "priority": request.priority,
+            "request_to_consultant": request.request_to_consultant,
+            "consultant_requirements": request.consultant_requirements if request.request_to_consultant else None,
             "researchers": project.selected_researchers,
             "submitted_at": datetime.now().isoformat(),
             "status": "submitted"
         }
         
         # 本番環境では外部システムに送信
-        logger.info(f"📤 マッチング依頼送信: {project_id}")
-        logger.info(f"   対象研究者: {len(project.selected_researchers)}名")
+        if request.request_to_consultant:
+            logger.info(f"👨‍💼 専門コンサルタントへマッチング依頼送信: {project_id}")
+            logger.info(f"   コンサルタント要件: {request.consultant_requirements}")
+        else:
+            logger.info(f"📤 研究者へ直接マッチング依頼送信: {project_id}")
+            logger.info(f"   対象研究者: {len(project.selected_researchers)}名")
         logger.info(f"   メッセージ: {request.message[:100]}...")
+        
+        matching_id = f"MATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         return {
             "success": True,
-            "matching_id": f"MATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            "matching_id": matching_id,
             "project_status": project.status,
-            "researchers_count": len(project.selected_researchers)
+            "researchers_count": len(project.selected_researchers),
+            "request_type": "consultant" if request.request_to_consultant else "direct",
+            "consultant_requirements": request.consultant_requirements if request.request_to_consultant else None
         }
     
     def update_project_status(
@@ -204,6 +245,15 @@ class ProjectManager:
         logger.info(f"🔄 プロジェクトステータス更新: {project_id} -> {status}")
         
         return True
+    
+    def delete_temp_project(self, project_id: str) -> bool:
+        """仮プロジェクトを削除"""
+        if project_id in self.projects_storage:
+            project = self.projects_storage[project_id]
+            del self.projects_storage[project_id]
+            logger.info(f"🗑️ 仮プロジェクト削除: {project_id} - {project.name}")
+            return True
+        return False
 
 # グローバルインスタンス
 project_manager = ProjectManager()
