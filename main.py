@@ -544,6 +544,77 @@ async def get_universities_fallback(error_type: str, error_message: str):
         }
     }
 
+def get_researcher_data_by_url(url: str) -> Optional[Dict[str, Any]]:
+    """researchmap_urlをキーにBigQueryから研究者データを取得する"""
+    from gcp_auth import get_bigquery_client
+    bq_client = get_bigquery_client()
+    if not bq_client:
+        logger.error("BigQuery client not available for summary generation.")
+        return None
+
+    query = f"SELECT * FROM `{BIGQUERY_TABLE}` WHERE researchmap_url = @url LIMIT 1"
+    
+    from google.cloud.bigquery import QueryJobConfig, ScalarQueryParameter
+    job_config = QueryJobConfig(
+        query_parameters=[ScalarQueryParameter("url", "STRING", url)]
+    )
+    
+    try:
+        logger.info(f"Querying BigQuery for researcher with URL: {url}")
+        query_job = bq_client.query(query, job_config=job_config)
+        results = query_job.to_dataframe()
+        if results.empty:
+            logger.warning(f"No researcher data found for URL: {url}")
+            return None
+        
+        # NaN (Not a Number) を PythonのNoneに変換してから辞書に変換
+        researcher_dict = results.iloc[0].where(pd.notnull(results.iloc[0]), None).to_dict()
+        return researcher_dict
+    except Exception as e:
+        logger.error(f"BigQueryからのデータ取得に失敗: {e}")
+        return None
+
+class SummaryRequest(BaseModel):
+    researchmap_url: str
+
+@app.post("/api/generate-summary")
+async def generate_single_summary(request: SummaryRequest):
+    """
+    指定されたresearchmap_urlに基づいて、単一の研究者のAI要約を生成するエンドポイント
+    """
+    logger.info(f"🤖 AI要約生成リクエスト受信: {request.researchmap_url}")
+    
+    # 1. BigQueryから研究者データを取得
+    researcher_data = get_researcher_data_by_url(request.researchmap_url)
+    
+    if not researcher_data:
+        logger.warning(f"研究者データが見つかりません: {request.researchmap_url}")
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "error": "指定されたURLの研究者データが見つかりません。"}
+        )
+        
+    try:
+        # 2. evaluation_systemから評価インスタンスを作成
+        from evaluation_system import UniversalResearchEvaluator
+        evaluator = UniversalResearchEvaluator()
+        
+        # 3. evaluation_system.pyに追加した単一要約生成メソッドを呼び出す
+        summary_text = await evaluator.generate_single_summary(researcher_data)
+        
+        if summary_text:
+            logger.info(f"✅ AI要約生成成功: {request.researchmap_url}")
+            return {"status": "success", "summary": summary_text}
+        else:
+            raise Exception("LLMからの要約取得に失敗しました。")
+
+    except Exception as e:
+        logger.error(f"❌ AI要約生成中にエラー: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "error": f"要約の生成中にサーバーエラーが発生しました: {str(e)}"}
+        )
+
 @app.post("/api/search", response_model=SearchResponse)
 async def search_researchers(request: SearchRequest):
     """
