@@ -224,17 +224,21 @@ def get_simple_university_query(table_name: str) -> str:
           WHEN main_affiliation_name_ja LIKE '%東海国立大学機構%' THEN '名古屋大学'
           
           -- STEP 2: 上記の特殊ルールに当てはまらない場合に、一般的な正規化を適用
-          ELSE TRIM(
-            REGEXP_REPLACE(
-            REGEXP_REPLACE(
-            REGEXP_REPLACE(main_affiliation_name_ja, 
-                -- ▼▼▼ ここから正規表現の書き方を修正 ▼▼▼
-                '^(国立大学法人|学校法人|公立大学法人)\\\\s*', ''),  -- r'' を削除し、\\s に変更
-                '／.*$', ''),                                       -- r'' を削除
-                '\\\\s*(大学院|大学病院|病院|研究院|研究センター|研究科|学部|附属|特任准教授|教授|准教授|客員|機構|センター).*$', '') -- r'' を削除し、\\s に変更
-                -- ▲▲▲ ここまで修正 ▲▲▲
+          ELSE
+            -- ▼▼▼ REGEXP_REPLACEのネスト構造を修正 ▼▼▼
+            TRIM(
+                REGEXP_REPLACE( -- 3. 最後に大学名以降の組織名を削除
+                    REGEXP_REPLACE( -- 2. 次に'／'以降を削除
+                        REGEXP_REPLACE( -- 1. 最初に接頭辞を削除
+                            main_affiliation_name_ja,
+                            '^(国立大学法人|学校法人|公立大学法人)\\\\s*', ''
+                        ),
+                        '／.*$', ''
+                    ),
+                    '\\\\s*(大学院|大学病院|病院|研究院|研究センター|研究科|学部|附属|特任准教授|教授|准教授|客員|機構|センター).*$', ''
+                )
             )
-          )
+            -- ▲▲▲ 修正ここまで ▲▲▲
         END AS university_name,
         name_ja,
         main_affiliation_name_ja as original_name
