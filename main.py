@@ -576,15 +576,12 @@ def get_researcher_data_by_url(url: str) -> Optional[Dict[str, Any]]:
 
 class SummaryRequest(BaseModel):
     researchmap_url: str
+    query: str  # queryフィールドを追加
 
 @app.post("/api/generate-summary")
 async def generate_single_summary(request: SummaryRequest):
-    """
-    指定されたresearchmap_urlに基づいて、単一の研究者のAI要約を生成するエンドポイント
-    """
-    logger.info(f"🤖 AI要約生成リクエスト受信: {request.researchmap_url}")
+    logger.info(f"🤖 AI要約生成リクエスト受信: {request.researchmap_url} (Query: {request.query})")
     
-    # 1. BigQueryから研究者データを取得
     researcher_data = get_researcher_data_by_url(request.researchmap_url)
     
     if not researcher_data:
@@ -595,12 +592,11 @@ async def generate_single_summary(request: SummaryRequest):
         )
         
     try:
-        # 2. evaluation_systemから評価インスタンスを作成
         from evaluation_system import UniversalResearchEvaluator
         evaluator = UniversalResearchEvaluator()
         
-        # 3. evaluation_system.pyに追加した単一要約生成メソッドを呼び出す
-        summary_text = await evaluator.generate_single_summary(researcher_data)
+        # ▼▼▼ evaluatorに request.query を渡すように修正 ▼▼▼
+        summary_text = await evaluator.generate_single_summary(researcher_data, request.query)
         
         if summary_text:
             logger.info(f"✅ AI要約生成成功: {request.researchmap_url}")
