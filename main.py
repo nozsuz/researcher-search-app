@@ -203,8 +203,7 @@ async def health_check():
 
 def get_simple_university_query(table_name: str) -> str:
     """
-    完全統合対応の大学統計クエリ - BigQuery安全版
-    複雑な正規表現を避け、シンプルなパターンマッチングで実現
+    【最終改善版】特殊な統合ルールと、一般的な正規化を組み合わせたクエリ
     """
     return f"""
     WITH base_data AS (
@@ -212,119 +211,53 @@ def get_simple_university_query(table_name: str) -> str:
         main_affiliation_name_ja,
         name_ja
       FROM `{table_name}`
-      WHERE main_affiliation_name_ja IS NOT NULL
-        AND main_affiliation_name_ja LIKE '%大学%'
+      WHERE main_affiliation_name_ja IS NOT NULL AND main_affiliation_name_ja LIKE '%大学%'
     ),
     
-    clean_universities AS (
-      SELECT 
+    cleaned_names AS (
+      SELECT
+        -- ▼▼▼ ここからがハイブリッドな正規化ロジック ▼▼▼
         CASE
-          -- 【最優先】東京科学大学統合: 東京工業大学 + 東京医科歯科大学 → 東京科学大学
+          -- STEP 1: 【最優先】特殊な統合ルールを先に定義
           WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
           WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
-          
-          -- 【東海国立大学機構処理】東海国立大学機構 → 名古屋大学（主要構成大学）
           WHEN main_affiliation_name_ja LIKE '%東海国立大学%' THEN '名古屋大学'
           WHEN main_affiliation_name_ja LIKE '%東海国立大学機構%' THEN '名古屋大学'
           
-          -- 【国立大学法人処理】"国立大学法人〇〇大学" → "〇〇大学"
-          WHEN main_affiliation_name_ja LIKE '国立大学法人%' THEN
-            CASE 
-              -- 国立大学法人内でも東京科学統合をチェック
-              WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
-              WHEN main_affiliation_name_ja LIKE '%東京医科歯科大学%' THEN '東京科学大学'
-              -- 東海国立大学機構の処理
-              WHEN main_affiliation_name_ja LIKE '%東海国立大学%' THEN '名古屋大学'
-              -- 一般的な国立大学法人処理
-              WHEN main_affiliation_name_ja LIKE '国立大学法人東京大学%' THEN '東京大学'
-              WHEN main_affiliation_name_ja LIKE '国立大学法人京都大学%' THEN '京都大学'
-              WHEN main_affiliation_name_ja LIKE '国立大学法人大阪大学%' THEN '大阪大学'
-              WHEN main_affiliation_name_ja LIKE '国立大学法人北海道大学%' THEN '北海道大学'
-              WHEN main_affiliation_name_ja LIKE '国立大学法人東北大学%' THEN '東北大学'
-              WHEN main_affiliation_name_ja LIKE '国立大学法人九州大学%' THEN '九州大学'
-              WHEN main_affiliation_name_ja LIKE '国立大学法人筑波大学%' THEN '筑波大学'
-              WHEN main_affiliation_name_ja LIKE '国立大学法人名古屋大学%' THEN '名古屋大学'
-              WHEN main_affiliation_name_ja LIKE '国立大学法人東京科学大学%' THEN '東京科学大学'
-              -- その他の国立大学法人
-              ELSE REGEXP_REPLACE(main_affiliation_name_ja, '国立大学法人', '')
-            END
-          
-          -- 【通常の大学名抽出】シンプルなパターンマッチング
-          ELSE main_affiliation_name_ja
-        END as university_name_raw,
+          -- STEP 2: 上記の特殊ルールに当てはまらない場合に、一般的な正規化を適用
+          ELSE TRIM(
+            REGEXP_REPLACE(
+            REGEXP_REPLACE(
+            REGEXP_REPLACE(main_affiliation_name_ja, 
+                r'^(国立大学法人|学校法人|公立大学法人)\\s*', ''),
+                r'／.*$', ''),
+                r'\\s*(大学院|大学病院|病院|研究院|研究センター|研究科|学部|附属|特任准教授|教授|准教授|客員|機構|センター).*$', '')
+            )
+          )
+        END AS university_name,
         name_ja,
         main_affiliation_name_ja as original_name
       FROM base_data
     ),
-    
-    extracted_universities AS (
-      SELECT
-        CASE
-          -- 大学名の精密抽出（附属機関を除外）
-          WHEN university_name_raw LIKE '%大学院%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学院.*', '大学'))
-          WHEN university_name_raw LIKE '%大学病院%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学病院.*', '大学'))
-          WHEN university_name_raw LIKE '%大学研究%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学研究.*', '大学'))
-          WHEN university_name_raw LIKE '%大学附属%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学附属.*', '大学'))
-          WHEN university_name_raw LIKE '%大学センター%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学センター.*', '大学'))
-          WHEN university_name_raw LIKE '%大学機構%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学機構.*', '大学'))
-          WHEN university_name_raw LIKE '%大学学部%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学学部.*', '大学'))
-          WHEN university_name_raw LIKE '%大学学科%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学学科.*', '大学'))
-          -- その他のパターン処理
-          WHEN university_name_raw LIKE '%大学医学%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学医学.*', '大学'))
-          WHEN university_name_raw LIKE '%大学法学%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学法学.*', '大学'))
-          WHEN university_name_raw LIKE '%大学工学%' THEN 
-            TRIM(REGEXP_REPLACE(university_name_raw, '大学工学.*', '大学'))
-          ELSE university_name_raw
-        END as university_name,
-        name_ja,
-        original_name
-      FROM clean_universities
-    ),
-    
+
     validated_universities AS (
       SELECT 
         university_name,
         name_ja,
         original_name
-      FROM extracted_universities
+      FROM cleaned_names
       WHERE university_name IS NOT NULL
-        AND university_name != ''
         AND university_name LIKE '%大学'
-        AND university_name NOT LIKE '%大学大学%'  -- 重複除去
-        AND university_name NOT LIKE '%大学院%'    -- 大学院除去
-        AND university_name NOT LIKE '%大学病院%'  -- 病院除去
         AND LENGTH(university_name) >= 3
-        AND LENGTH(university_name) <= 15
-        -- 異常パターンの除外
-        AND university_name NOT IN ('', '大学', '国立大学', '私立大学', '公立大学')
-        -- 　（全角スペース）や不適切な文字を除外
-        AND university_name NOT LIKE '%　%'
-        AND university_name NOT LIKE '% %'  -- 空白文字あり
     )
     
     SELECT 
       university_name,
       COUNT(DISTINCT name_ja) as researcher_count,
-      ARRAY_AGG(DISTINCT original_name ORDER BY original_name LIMIT 5) as original_names,
-      -- 統合情報の追加
-      CASE 
-        WHEN university_name = '東京科学大学' THEN '東京工業大学 + 東京医科歯科大学 + 東京科学大学'
-        WHEN university_name = '名古屋大学' THEN '名古屋大学 + 東海国立大学機構(名古屋大学+岐阜大学)'
-        ELSE NULL
-      END as merge_info
+      ARRAY_AGG(DISTINCT original_name ORDER BY original_name LIMIT 5) as original_names
     FROM validated_universities
     GROUP BY university_name
-    HAVING COUNT(DISTINCT name_ja) >= 5  -- 最低5名以上の研究者
+    HAVING COUNT(DISTINCT name_ja) >= 5
     ORDER BY researcher_count DESC
     LIMIT 100
     """
