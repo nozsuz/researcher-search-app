@@ -316,49 +316,47 @@ class UniversalResearchEvaluator:
             summary=f"「{query}」に関連する研究を行っています。",
             strengths=[]
         )
-    # evaluation_system.py の UniversalResearchEvaluator クラス内に追加
 
-    async def generate_single_summary(self, researcher_data: Dict[str, Any]) -> Optional[str]:
-        """
-        単一の研究者データから汎用的な200字要約を生成する
-        """
-        if not self.model:
-            logger.warning("LLM not available for single summary generation.")
-            return "LLMが利用できないため、要約を生成できませんでした。"
+async def generate_single_summary(self, researcher_data: Dict[str, Any], query: str) -> Optional[str]:
+    """
+    単一の研究者データと検索クエリから関連性要約を生成する
+    """
+    if not self.model:
+        logger.warning("LLM not available for single summary generation.")
+        return "LLMが利用できないため、要約を生成できませんでした。"
 
-        prompt = self._create_single_summary_prompt(researcher_data)
+    prompt = self._create_single_summary_prompt(researcher_data, query)
+    
+    try:
+        logger.info(f"単独要約生成のためLLMを呼び出し: {researcher_data.get('name_ja')} (Query: {query})")
+        if "gemini" in self.model_name:
+            response = self.model.generate_content(prompt, generation_config={"temperature": 0.2})
+            summary = response.text
+        else:
+            response = self.model.predict(prompt, temperature=0.2)
+            summary = response.text
         
-        try:
-            logger.info(f"単独要約生成のためLLMを呼び出し: {researcher_data.get('name_ja')}")
-            if "gemini" in self.model_name:
-                response = self.model.generate_content(prompt, generation_config={"temperature": 0.2})
-                summary = response.text
-            else: # Fallback for text-bison
-                response = self.model.predict(prompt, temperature=0.2)
-                summary = response.text
-            
-            return summary.strip()
-        except Exception as e:
-            logger.error(f"❌ 単独要約の生成エラー: {e}")
-            return None
+        return summary.strip()
+    except Exception as e:
+        logger.error(f"❌ 単独要約の生成エラー: {e}")
+        return None
 
-    def _create_single_summary_prompt(self, researcher: Dict[str, Any]) -> str:
-        """単独要約生成用のプロンプトを生成"""
-        info = f"""
+def _create_single_summary_prompt(self, researcher: Dict[str, Any], query: str) -> str:
+    """単独要約生成用のプロンプトを生成"""
+    info = f"""
 研究者情報:
 名前: {researcher.get('name_ja', '')}
 所属: {researcher.get('main_affiliation_name_ja', '')}
 研究キーワード: {researcher.get('research_keywords_ja', '')}
-研究分野: {researcher.get('research_fields_ja', '')}
 プロフィール: {str(researcher.get('profile_ja', ''))[:400] if researcher.get('profile_ja') else ''}
 主要論文: {researcher.get('paper_title_ja_first', '')}
 """
-        prompt = f"""
-以下の研究者情報を基に、研究キーワード、プロフィール、主要論文、主要プロジェクトを踏まえて、検索クエリ「{query}」との関連性を200字程度で要約。要約文のみを出力すること。
+    prompt = f"""
+以下の研究者情報を基に、研究キーワード、プロフィール、主要論文、主要プロジェクトを踏まえて、検索クエリ「{query}」との関連性を200字程度で要約してください。要約文のみを出力してください。
 
 {info}
 """
-        return prompt
+    return prompt
         
     def _legacy_evaluate(
         self, 
