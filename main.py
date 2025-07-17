@@ -216,7 +216,6 @@ def get_simple_university_query(table_name: str) -> str:
     
     cleaned_names AS (
       SELECT
-        -- ▼▼▼ ここからがハイブリッドな正規化ロジック ▼▼▼
         CASE
           -- STEP 1: 【最優先】特殊な統合ルールを先に定義
           WHEN main_affiliation_name_ja LIKE '%東京工業大学%' THEN '東京科学大学'
@@ -229,9 +228,11 @@ def get_simple_university_query(table_name: str) -> str:
             REGEXP_REPLACE(
             REGEXP_REPLACE(
             REGEXP_REPLACE(main_affiliation_name_ja, 
-                r'^(国立大学法人|学校法人|公立大学法人)\\s*', ''),
-                r'／.*$', ''),
-                r'\\s*(大学院|大学病院|病院|研究院|研究センター|研究科|学部|附属|特任准教授|教授|准教授|客員|機構|センター).*$', '')
+                -- ▼▼▼ ここから正規表現の書き方を修正 ▼▼▼
+                '^(国立大学法人|学校法人|公立大学法人)\\\\s*', ''),  -- r'' を削除し、\\s に変更
+                '／.*$', ''),                                       -- r'' を削除
+                '\\\\s*(大学院|大学病院|病院|研究院|研究センター|研究科|学部|附属|特任准教授|教授|准教授|客員|機構|センター).*$', '') -- r'' を削除し、\\s に変更
+                -- ▲▲▲ ここまで修正 ▲▲▲
             )
           )
         END AS university_name,
@@ -261,7 +262,7 @@ def get_simple_university_query(table_name: str) -> str:
     ORDER BY researcher_count DESC
     LIMIT 100
     """
-
+    
 @app.get("/api/universities")
 async def get_universities():
     """
