@@ -217,14 +217,14 @@ async def perform_real_search(request) -> Dict[str, Any]:
         logger.error(f"❌ 実際の検索でエラー: {e}")
         return { "status": "error", "error_message": str(e), "execution_time": time.time() - start_time }
 
-# ▼▼▼ この関数を全面的に修正 ▼▼▼
+# ▼▼▼ この関数をまるごと置き換えてください ▼▼▼
 async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str, max_results: int, university_filter: Optional[List[str]] = None, exclude_keywords: Optional[List[str]] = None) -> List[Dict]:
     """
-    実際のセマンティック検索（事後フィルタリング方式に修正）
+    実際のセマンティック検索（事後フィルタリング方式の【完全修正版】）
     """
     query_embedding = None
     try:
-        logger.info(f"🔍 セマンティック検索（事後フィルタリング方式）実行: {query}")
+        logger.info(f"🔍 セマンティック検索（事後フィルタリング【修正版】）実行: {query}")
         
         # 1. クエリのベクトル化
         embedding_model = TextEmbeddingModel.from_pretrained("text-multilingual-embedding-002")
@@ -243,7 +243,6 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         # 2. 大学フィルター条件（事前フィルタリング用）
         university_condition = ""
         if university_filter and len(university_filter) > 0:
-            # (大学フィルターのロジックは変更なし)
             try:
                 from university_normalizer_fixed import get_university_normalization_sql
                 safe_universities = [univ.replace("'", "''") for univ in university_filter]
@@ -257,30 +256,30 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                 university_condition = f" AND ({' OR '.join(like_conditions)})"
 
         # 3. 除外キーワード条件（事後フィルタリング用）
-        exclude_condition = ""
+        exclude_where_clause = ""
         if exclude_keywords:
             conditions = []
             for keyword in exclude_keywords:
                 safe_keyword = keyword.replace("'", "''")
+                # `base`プレフィックスを削除
                 conditions.append(f"""
                     NOT (
-                        LOWER(base.research_keywords_ja) LIKE LOWER('%{safe_keyword}%') OR
-                        LOWER(base.research_fields_ja) LIKE LOWER('%{safe_keyword}%') OR
-                        LOWER(base.profile_ja) LIKE LOWER('%{safe_keyword}%')
+                        LOWER(research_keywords_ja) LIKE LOWER('%{safe_keyword}%') OR
+                        LOWER(research_fields_ja) LIKE LOWER('%{safe_keyword}%') OR
+                        LOWER(profile_ja) LIKE LOWER('%{safe_keyword}%')
                     )
                 """)
             if conditions:
-                # WHERE句の先頭なので AND は不要
-                exclude_condition = f" WHERE {' AND '.join(conditions)}"
+                exclude_where_clause = f"WHERE {' AND '.join(conditions)}"
 
         # 4. 事後フィルタリングを行うSQLクエリを構築
-        # top_kを多めに取得(max_results * 5, 最小50)してフィルタリング後の件数を確保
         top_k_for_search = max(50, max_results * 5)
 
         sql_query_semantic = f"""
         WITH vector_results AS (
             SELECT
-                *
+                base.*,  -- ここでbase構造を展開する
+                distance
             FROM
                 VECTOR_SEARCH(
                     (SELECT * FROM `apt-rope-217206.researcher_data.rd_250524`
@@ -292,13 +291,12 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                 )
         )
         SELECT *
-        FROM vector_results AS base
-        {exclude_condition}
+        FROM vector_results
+        {exclude_where_clause}
         ORDER BY distance ASC
         LIMIT @max_results
         """
         
-        # ★★★ 生成されたクエリをログに出力 ★★★
         logger.info(f"Generated SQL for Semantic Search:\n{sql_query_semantic}")
         
         try:
@@ -312,17 +310,9 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
             
             if len(df) > 0:
                 results = []
+                # この修正により、dfには既に展開されたカラムが含まれるため、整形ロジックを簡略化
                 for idx, row in df.iterrows():
-                    # (結果の整形処理は変更なし)
-                    result = {}
-                    for col in df.columns:
-                        value = row[col]
-                        if col == 'distance': result['distance'] = value
-                        elif col == 'base' and isinstance(value, dict):
-                            for key, val in value.items(): result[key] = val
-                        elif '.' in col: result[col.split('.')[-1]] = value
-                        else: result[col] = value
-                    
+                    result = row.to_dict()
                     is_young, young_reasons = is_young_researcher(result)
                     result["is_young_researcher"] = is_young
                     result["young_researcher_reasons"] = young_reasons
@@ -345,7 +335,6 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
         logger.error(f"❌ セマンティック検索エラー: {e}")
         logger.info("🔄 キーワード検索にフォールバック")
         return await keyword_search(bq_client, query, max_results, university_filter, exclude_keywords)
-
 
 async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: str, query_embedding: List[float], max_results: int, university_filter: Optional[List[str]] = None, exclude_keywords: Optional[List[str]] = None) -> List[Dict]:
     # (この関数は変更ありません)
