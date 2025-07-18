@@ -63,6 +63,7 @@ class SearchRequest(BaseModel):
     query: str
     method: str = "semantic"
     max_results: int = 5
+    exclude_keywords: Optional[List[str]] = Query(None, description="検索結果から除外したいキーワードのリスト")
     use_llm_expansion: bool = False
     use_llm_summary: bool = False
     use_internal_evaluation: bool = False
