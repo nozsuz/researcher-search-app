@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field # Field をインポート
 import pandas as pd
 import os
 import time
@@ -63,7 +63,9 @@ class SearchRequest(BaseModel):
     query: str
     method: str = "semantic"
     max_results: int = 5
-    exclude_keywords: Optional[List[str]] = Query(None, description="検索結果から除外したいキーワードのリスト")
+    # ▼▼▼ ここを修正 ▼▼▼
+    exclude_keywords: Optional[List[str]] = Field(None, description="検索結果から除外したいキーワードのリスト")
+    # ▲▲▲ 修正完了 ▲▲▲
     use_llm_expansion: bool = False
     use_llm_summary: bool = False
     use_internal_evaluation: bool = False
@@ -948,12 +950,12 @@ if __name__ == "__main__":
     print("  - /api/analyze-researcher (ResearchMap詳細分析)")
     print("  - /api/temp-projects (仮プロジェクト管理)")
     print("🔗 統合機能:")
-    print("   ✅ 東京科学大学統合: 東京工業 + 東京医科歯科 → 東京科学 (3,503名)")
-    print("   ✅ 附属機関統合: 大学院・病院・研究科 → 親大学")
-    print("   ✅ 国立大学法人除去と統合処理")
-    print("   ✅ プロジェクト作成からマッチング依頼までの完全ワークフロー")
-    print("   ✅ ResearchMap API連携による詳細分析")
-    print("   ✅ 研究者検索からプロジェクト管理までのシームレス統合")
+    print("  ✅ 東京科学大学統合: 東京工業 + 東京医科歯科 → 東京科学 (3,503名)")
+    print("  ✅ 附属機関統合: 大学院・病院・研究科 → 親大学")
+    print("  ✅ 国立大学法人除去と統合処理")
+    print("  ✅ プロジェクト作成からマッチング依頼までの完全ワークフロー")
+    print("  ✅ ResearchMap API連携による詳細分析")
+    print("  ✅ 研究者検索からプロジェクト管理までのシームレス統合")
     
     uvicorn.run(
         "main:app",
