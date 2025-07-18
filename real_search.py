@@ -234,7 +234,6 @@ async def perform_real_search(request) -> Dict[str, Any]:
         # 若手研究者フィルタリング
         young_researcher_filter = getattr(request, 'young_researcher_filter', False)
         
-        # ▼▼▼ ここから変更 ▼▼▼
         # 大学フィルタリング
         university_filter = getattr(request, 'university_filter', None)
         # 除外キーワードを取得
@@ -247,7 +246,6 @@ async def perform_real_search(request) -> Dict[str, Any]:
         # 除外キーワードのログを追加
         if exclude_keywords:
             logger.info(f"🚫 除外キーワード: {exclude_keywords}")
-        # ▲▲▲ ここまで変更 ▲▲▲
         
         # GCPクライアントを取得
         from gcp_auth import get_bigquery_client, is_vertex_ai_ready
@@ -299,10 +297,8 @@ async def perform_real_search(request) -> Dict[str, Any]:
         
         # 検索方法に応じて実行
         if request.method == "semantic" and vertex_ai_available:
-            # ▼▼▼ semantic_search_with_embedding に exclude_keywords を渡す ▼▼▼
             results = await semantic_search_with_embedding(bq_client, search_query, request.max_results, university_filter, exclude_keywords)
         else:  # keyword
-            # ▼▼▼ keyword_search に exclude_keywords を渡す ▼▼▼
             results = await keyword_search(bq_client, search_query, request.max_results, university_filter, exclude_keywords)
         
         logger.info(f"📊 検索結果: {len(results)}件")
@@ -420,11 +416,11 @@ async def perform_real_search(request) -> Dict[str, Any]:
             "execution_time": time.time() - start_time
         }
 
-# ▼▼▼ 関数の定義に exclude_keywords を追加 ▼▼▼
 async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str, max_results: int, university_filter: Optional[List[str]] = None, exclude_keywords: Optional[List[str]] = None) -> List[Dict]:
     """
     実際のセマンティック検索（VECTOR_SEARCH関数を使用）
     """
+    query_embedding = None # tryブロックの外で初期化
     try:
         logger.info(f"🔍 セマンティック検索（VECTOR_SEARCH）実行: {query}")
         
@@ -468,7 +464,7 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                 like_conditions = [f"main_affiliation_name_ja LIKE '%{univ}%'" for univ in safe_universities]
                 university_condition = f" AND ({' OR '.join(like_conditions)})"
 
-        # ▼▼▼ 除外キーワード条件を構築 ▼▼▼
+        # 除外キーワード条件を構築
         exclude_condition = ""
         if exclude_keywords:
             conditions = []
@@ -484,7 +480,6 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
                 """)
             if conditions:
                 exclude_condition = f" AND {' AND '.join(conditions)}"
-        # ▲▲▲ ここまで追加 ▲▲▲
         
         # 2. VECTOR_SEARCH関数を使用してセマンティック検索
         sql_query_semantic = f"""
@@ -492,7 +487,6 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
             *
         FROM
             VECTOR_SEARCH(
-                -- ▼▼▼ サブクエリのWHERE句に exclude_condition を追加 ▼▼▼
                 (SELECT * FROM `apt-rope-217206.researcher_data.rd_250524`
                  WHERE ARRAY_LENGTH(embedding) > 0{university_condition}{exclude_condition}),
                 'embedding',
@@ -594,15 +588,15 @@ async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str,
             import traceback
             traceback.print_exc()
             
-            # VECTOR_SEARCH関数が使えない場合は、リアルタイムベクトル化にフォールバック
+            # ▼▼▼ 修正: exclude_keywords を引き継ぐ ▼▼▼
             logger.info("🔄 リアルタイムベクトル化検索にフォールバック")
-            return await semantic_search_realtime_fallback(bq_client, query, query_embedding, max_results, university_filter, exclude_keywords) # Fallbackにも渡す
+            return await semantic_search_realtime_fallback(bq_client, query, query_embedding, max_results, university_filter, exclude_keywords)
         
     except Exception as e:
         logger.error(f"❌ セマンティック検索エラー: {e}")
-        # エラー時はキーワード検索にフォールバック
+        # ▼▼▼ 修正: exclude_keywords を引き継ぐ ▼▼▼
         logger.info("🔄 キーワード検索にフォールバック")
-        return await keyword_search(bq_client, query, max_results, university_filter, exclude_keywords) # Fallbackにも渡す
+        return await keyword_search(bq_client, query, max_results, university_filter, exclude_keywords)
 
 async def semantic_search_realtime_fallback(bq_client: bigquery.Client, query: str, query_embedding: List[float], max_results: int, university_filter: Optional[List[str]] = None, exclude_keywords: Optional[List[str]] = None) -> List[Dict]:
     """
@@ -803,7 +797,6 @@ def calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
         logger.warning(f"⚠️ コサイン類似度計算エラー: {e}")
         return 0.0
 
-# ▼▼▼ 関数の定義に exclude_keywords を追加 ▼▼▼
 async def keyword_search(bq_client: bigquery.Client, query: str, max_results: int, university_filter: Optional[List[str]] = None, exclude_keywords: Optional[List[str]] = None) -> List[Dict]:
     """
     キーワード検索（全文検索、拡張キーワード対応）
@@ -869,7 +862,7 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
                 like_conditions = [f"main_affiliation_name_ja LIKE '%{univ}%'" for univ in safe_universities]
                 university_condition = f" AND ({' OR '.join(like_conditions)})"
 
-        # ▼▼▼ 除外キーワード条件を構築 ▼▼▼
+        # 除外キーワード条件を構築
         exclude_condition = ""
         if exclude_keywords:
             conditions = []
@@ -885,7 +878,6 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
                 """)
             if conditions:
                 exclude_condition = f" AND {' AND '.join(conditions)}"
-        # ▲▲▲ ここまで追加 ▲▲▲
 
         search_sql = f"""
         SELECT 
@@ -906,7 +898,6 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
             -- 関連度スコア（重み付けされたマッチの合計）
             ({total_relevance_score}) as relevance_score
         FROM `apt-rope-217206.researcher_data.rd_250524`
-        -- ▼▼▼ WHERE句に exclude_condition を追加 ▼▼▼
         WHERE ({where_clause}){university_condition}{exclude_condition}
         ORDER BY relevance_score DESC, name_ja
         LIMIT {max_results}
