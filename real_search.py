@@ -20,202 +20,209 @@ logger = logging.getLogger(__name__)
 evaluator = UniversalResearchEvaluator()
 
 def is_young_researcher(researcher_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    # (この関数は変更ありません)
+    """
+    若手研究者かどうかを判定するロジック（インデント修正・文字化け対策版）
+    """
     reasons = []
     name = researcher_data.get('name_ja', 'Unknown')
     logger.debug(f"🔍 若手研究者判定開始: {name}")
+
+    # --- データ準備 ---
     profile_ja = (researcher_data.get('profile_ja', '') or '').lower()
-    profile_positions = ['特任研究員', '特任講師', '特任助教', '助教', '准教授', '博士研究員', 'ポスドク', '研究員', '助手', '講師', '博士後期課程', '博士課程', 'ポストドクトラル', '日本学術振興会特別研究員', 'jsps特別研究員', '特別研究員', '博士学生', '大学院生', '医員']
-    current_position_patterns = [r'\d{4}年\s*-\s*(.+)', r'\d{4}年\s*～\s*(.+)', r'\d{4}年\s*から\s*(.+)', r'現在\s*[：:]?\s*(.+)']
-    for pattern in current_position_patterns:
-        match = re.search(pattern, profile_ja)
-        if match:
-            position_text = match.group(1).lower()
-            for pos in profile_positions:
-                if pos in position_text:
-                    reasons.append(f"現職(プロフィール): {pos}")
-                    break
-            if reasons: break
     job_ja = (researcher_data.get('main_affiliation_job_ja', '') or '').lower()
     job_title_ja = (researcher_data.get('main_affiliation_job_title_ja', '') or '').lower()
     job_en = (researcher_data.get('main_affiliation_job_en', '') or '').lower()
     job_title_en = (researcher_data.get('main_affiliation_job_title_en', '') or '').lower()
-    young_positions_ja = ['助教', '准教授', '博士研究員', 'ポスドク', '研究員', '特任助教', '特任准教授', '助手', '講師', '特任研究員', '博士後期課程', '博士課程', 'ポストドクトラル', '日本学術振興会特別研究員', 'jsps特別研究員', '特別研究員', '博士学生', '大学院生']
+    
+    combined_job_info = f"{job_ja} {job_title_ja} {job_en} {job_title_en}"
+    
+    # --- 判定キーワード定義 ---
+    young_positions_ja = ['助教', '准教授', '博士研究員', 'ポスドク', '研究員', '特任助教', '特任准教授', '助手', '講師', '特任研究員', '博士後期課程', '博士課程', 'ポストドクトラル', '日本学術振興会特別研究員', 'jsps特別研究員', '特別研究員', '博士学生', '大学院生', '医員']
     young_positions_en = ['assistant', 'associate professor', 'postdoc', 'researcher', 'fellow', 'doctoral', 'phd student', 'graduate student', 'research associate', 'post-doctoral', 'jsps fellow']
-    senior_positions_ja = ['教授', '名誉教授', '客員教授', '特任教授', '主席研究員', '統括']
-    senior_positions_en = ['professor', 'emeritus', 'director', 'principal', 'chief']
-    for pos in young_positions_ja:
-        if pos in job_ja or pos in job_title_ja:
-            is_senior = any(sp in job_ja or sp in job_title_ja for sp in senior_positions_ja)
-            if not is_senior:
-                reasons.append(f"職位: {pos}")
-                break
-    for pos in young_positions_en:
-        if pos in job_en or pos in job_title_en:
-            is_senior = any(sp in job_en or sp in job_title_en for sp in senior_positions_en)
-            if not is_senior and 'full professor' not in job_en.lower():
-                reasons.append(f"職位(英): {pos}")
-                break
-    young_keywords = ['若手', '新進気鋭', 'early career', '博士課程', '博士取得', '学位取得', 'キャリア初期', '研究員として', '採用され', '着任', '博士号取得', 'ph.d.取得', '学振', 'jsps', '育志賞', '若手研究者賞', '奨励賞']
-    heisei_pattern = r'平成元年生まれ|平成\d+年生まれ'
-    if re.search(heisei_pattern, profile_ja):
-        match = re.search(heisei_pattern, profile_ja)
-        birth_text = match.group(0)
-        if '平成元年' in birth_text: birth_year = 1989
-        else:
-            heisei_year = int(re.search(r'\d+', birth_text).group(0))
-            birth_year = 1988 + heisei_year
-        current_year = datetime.now().year
-        age = current_year - birth_year
-        if age <= 45: reasons.append(f"生年: {birth_text}（{age}歳）")
-    for keyword in young_keywords:
+    senior_positions_ja = ['教授', '名誉教授', '客員教授', '特任教授', '主席研究員', '統括', '代表取締役', '社長', '所長', 'センター長']
+    senior_positions_en = ['professor', 'emeritus', 'director', 'principal', 'chief', 'ceo', 'president']
+    
+    # --- 1. 除外条件のチェック (最優先) ---
+    for pos in senior_positions_ja:
+        if pos in combined_job_info:
+            reasons = [f"除外条件(\u8077\u4f4d): {pos}"]
+            logger.debug(f"🎯 若手判定結果: {name} - False - {reasons}")
+            return False, reasons
+            
+    for pos in senior_positions_en:
+        if pos in combined_job_info and 'associate professor' not in combined_job_info:
+            reasons = [f"除外条件(\u8077\u4f4d,英): {pos}"]
+            logger.debug(f"🎯 若手判定結果: {name} - False - {reasons}")
+            return False, reasons
+
+    exclusion_keywords_profile = ['退職', '元教授', '元所長', '顧問', '理事長', '学長', '総長']
+    for keyword in exclusion_keywords_profile:
         if keyword in profile_ja:
-            reasons.append(f"キーワード: {keyword}")
+            reasons = [f"除外条件(経歴): {keyword}"]
+            logger.debug(f"🎯 若手判定結果: {name} - False - {reasons}")
+            return False, reasons
+
+    # --- 2. 若手判定 (職位を優先) ---
+    for pos in young_positions_ja:
+        if pos in combined_job_info:
+            reasons.append(f"\u8077\u4f4d: {pos}")
             break
-    current_year = datetime.now().year
-    phd_patterns = [r'(\d{4})年.*?博士.*?取得', r'(\d{4})年.*?ph\.?d\.?', r'博士.*?(\d{4})年', r'ph\.?d\.?.*?(\d{4})', r'(\d{4})年.*?学位', r'(\d{4})年.*?博士課程.*?修了']
-    for pattern in phd_patterns:
-        match = re.search(pattern, profile_ja)
-        if match:
-            year = int(match.group(1))
-            years_since = current_year - year
-            if 0 <= years_since <= 15:
-                reasons.append(f"博士取得: {year}年（{years_since}年前）")
+    if not reasons:
+        for pos in young_positions_en:
+            if pos in combined_job_info:
+                reasons.append(f"\u8077\u4f4d(英): {pos}")
                 break
-    paper_title = researcher_data.get('paper_title_ja_first', '')
-    paper_year_match = re.search(r'\[(\d{4})\]', paper_title) or re.search(r'(\d{4})年', paper_title)
-    if paper_year_match:
-        first_paper_year = int(paper_year_match.group(1))
-        years_active = current_year - first_paper_year
-        if 0 <= years_active <= 10: reasons.append(f"研究開始: {first_paper_year}年（{years_active}年前）")
-    age_patterns = [r'(\d{2})歳', r'(\d{4})年生まれ', r'(\d{4})年.*?誕生']
-    for pattern in age_patterns:
-        match = re.search(pattern, profile_ja)
-        if match:
-            if '歳' in pattern:
-                age = int(match.group(1))
-                if 25 <= age <= 45: reasons.append(f"年齢: {age}歳")
-            else:
-                birth_year = int(match.group(1))
-                age = current_year - birth_year
-                if 25 <= age <= 45: reasons.append(f"生年: {birth_year}年（{age}歳）")
-            break
-    current_year = datetime.now().year
-    for i in range(current_year - 5, current_year + 1):
-        year_pattern = f"{i}年-|〜{i}年|{i}年～"
-        if re.search(year_pattern, profile_ja):
-            for pos in profile_positions:
-                if pos in profile_ja:
-                    reasons.append(f"現職(プロフィール): {pos} ({i}年～)")
-                    break
-            break
+
+    # --- 3. プロフィールからの推測 (職位で判定できなかった場合) ---
+    if not reasons:
+        current_position_patterns = [r'\d{4}年\s*-\s*(.+)', r'\d{4}年\s*～\s*(.+)', r'\d{4}年\s*から\s*(.+)', r'現在\s*[：:]?\s*(.+)']
+        for pattern in current_position_patterns:
+            match = re.search(pattern, profile_ja)
+            if match:
+                position_text = match.group(1).lower()
+                if not any(sp in position_text for sp in senior_positions_ja):
+                    for pos in young_positions_ja:
+                        if pos in position_text:
+                            reasons.append(f"現職(プロフィール): {pos}")
+                            break
+                if reasons: break
+        
+        if not reasons:
+            current_year = datetime.now().year
+            phd_patterns = [r'(\d{4})年.*?博士.*?取得', r'(\d{4})年.*?ph\\.?d\\.?', r'博士.*?(\d{4})年', r'ph\\.?d\\.?.*?(\d{4})', r'(\d{4})年.*?学位', r'(\d{4})年.*?博士課程.*?修了']
+            for pattern in phd_patterns:
+                match = re.search(pattern, profile_ja)
+                if match:
+                    year_str = match.group(1)
+                    if year_str and year_str.isdigit():
+                        year = int(year_str)
+                        years_since = current_year - year
+                        if 0 <= years_since <= 15:
+                            reasons.append(f"博士取得: {year}年（{years_since}年前）")
+                            break
+            
+            if not reasons:
+                age_patterns = [r'(\d{2})歳', r'(\d{4})年生まれ', r'(\d{4})年.*?誕生']
+                for pattern in age_patterns:
+                    match = re.search(pattern, profile_ja)
+                    if match:
+                        age_text = match.group(1)
+                        if age_text and age_text.isdigit():
+                            if '歳' in pattern:
+                                age = int(age_text)
+                                if 25 <= age <= 45: reasons.append(f"年齢: {age}歳")
+                            else:
+                                birth_year = int(age_text)
+                                age = current_year - birth_year
+                                if 25 <= age <= 45: reasons.append(f"生年: {birth_year}年（{age}歳）")
+                        if reasons: break
+            
+            if not reasons:
+                young_keywords = ['若手', '新進気鋭', 'early career', '博士課程', '博士取得', 'キャリア初期', '研究員として', '採用され', '着任', '博士号取得', 'ph.d.取得', '学振', 'jsps', '育志賞', '若手研究者賞', '奨励賞']
+                for keyword in young_keywords:
+                    if keyword in profile_ja:
+                        reasons.append(f"キーワード: {keyword}")
+                        break
+
     is_young = len(reasons) > 0
-    exclusion_keywords = ['退職', '名誉', '元教授', '元所長', '顧問', '理事長', '学長', '総長']
-    for keyword in exclusion_keywords:
-        if keyword in profile_ja or keyword in job_ja or keyword in job_title_ja:
-            is_young = False
-            reasons = [f"除外条件: {keyword}"]
-            break
     logger.debug(f"🎯 若手判定結果: {name} - {is_young} - {reasons}")
-    return is_young, reasons
+    return is_young, list(set(reasons))
+
 
 async def perform_real_search(request) -> Dict[str, Any]:
-    # (この関数は変更ありません)
+    """
+    研究者検索のメイン関数（フィルタリングロジック修正版）
+    """
     start_time = time.time()
     try:
         logger.info(f"🔍 実際の検索開始: {request.query}, method: {request.method}")
-        logger.info(f"📊 全パラメータ: query={request.query}, method={request.method}, max_results={request.max_results}, use_llm_expansion={request.use_llm_expansion}, use_llm_summary={request.use_llm_summary}, use_internal_evaluation={getattr(request, 'use_internal_evaluation', 'NONE')}")
-        use_internal_evaluation = False
-        use_ai_summary = request.use_llm_summary
+        
+        # --- パラメータ準備 ---
         young_researcher_filter = getattr(request, 'young_researcher_filter', False)
         university_filter = getattr(request, 'university_filter', None)
         exclude_keywords = getattr(request, 'exclude_keywords', None)
-        logger.info(f"📊 評価モード: 標準検索")
-        logger.info(f"📊 AI要約: {'ON' if use_ai_summary else 'OFF'}")
+        
+        logger.info(f"📊 若手フィルター: {'ON' if young_researcher_filter else 'OFF'}")
         if university_filter: logger.info(f"🏫 大学フィルター: {university_filter}")
         if exclude_keywords: logger.info(f"🚫 除外キーワード: {exclude_keywords}")
+
+        # --- GCPクライアント準備 ---
         from gcp_auth import get_bigquery_client, is_vertex_ai_ready
         bq_client = get_bigquery_client()
-        if not bq_client: raise Exception("BigQueryクライアントが利用できません")
-        vertex_ai_required = request.method == "semantic" or request.use_llm_expansion or request.use_llm_summary
+        if not bq_client:
+            raise Exception("BigQueryクライアントが利用できません")
+        
         vertex_ai_available = is_vertex_ai_ready()
-        if vertex_ai_required and not vertex_ai_available:
-            logger.warning("⚠️ Vertex AIが利用できません。代替手法を使用します。")
-            if request.method == "semantic":
-                logger.info("🔄 セマンティック検索 → 高度キーワード検索に変更")
-                request.method = "keyword"
+        if (request.method == "semantic" or request.use_llm_expansion) and not vertex_ai_available:
+            logger.warning("⚠️ Vertex AIが利用できないため、キーワード検索にフォールバックします。")
+            request.method = "keyword"
             request.use_llm_expansion = False
-            request.use_llm_summary = False
-        if request.method == "semantic":
-            request.use_llm_expansion = False
-            logger.info("🔄 セマンティック検索時はクエリ拡張を無効化")
+
+        # --- クエリ拡張 (必要な場合) ---
         search_query = request.query.strip()
         expanded_info = None
-        if request.use_llm_expansion and vertex_ai_available:
+        if request.use_llm_expansion and request.method == "keyword":
             try:
                 expansion_result = await expand_query_with_llm(search_query)
-                if expansion_result:
-                    expanded_info = { "original_query": expansion_result["original_query"], "expanded_keywords": expansion_result["expanded_keywords"], "expanded_query": expansion_result["expanded_query"] }
+                if expansion_result and expansion_result["expanded_keywords"] != [search_query]:
+                    expanded_info = expansion_result
                     search_query = expansion_result["expanded_query"]
-                    logger.info(f"🔄 LLMクエリ拡張結果: {search_query}")
-                    logger.info(f"🧠 拡張キーワード: {expansion_result['expanded_keywords']}")
-                else: logger.info("🔄 LLMクエリ拡張: 変更なし")
+                    logger.info(f"🧠 クエリ拡張実行: {search_query}")
             except Exception as e:
                 logger.warning(f"⚠️ LLMクエリ拡張失敗: {e}")
-                search_query = request.query.strip()
-        if request.method == "semantic" and vertex_ai_available:
+
+        # --- 検索実行 ---
+        # 各検索関数内で is_young_researcher の判定が行われる
+        if request.method == "semantic":
             results = await semantic_search_with_embedding(bq_client, search_query, request.max_results, university_filter, exclude_keywords)
         else:
             results = await keyword_search(bq_client, search_query, request.max_results, university_filter, exclude_keywords)
-        logger.info(f"📊 検索結果: {len(results)}件")
-        if young_researcher_filter and results:
+        
+        logger.info(f"📊 初期検索結果: {len(results)}件")
+
+        # --- 若手研究者フィルタリング (ここが重要) ---
+        # 検索結果に対して、リクエストに応じてフィルタリングを適用する
+        if young_researcher_filter:
             logger.info(f"🌟 若手研究者フィルタリングを実行")
-            filtered_results = []
-            for result in results:
-                if result.get('is_young_researcher', False):
-                    filtered_results.append(result)
-                    logger.info(f"  ✅ {result.get('name_ja', 'Unknown')}: {result.get('young_researcher_reasons', [])}")
-                else: logger.debug(f"  ❌ {result.get('name_ja', 'Unknown')}: 若手研究者ではない")
+            
+            # is_young_researcherがTrueのレコードのみを抽出
+            filtered_results = [r for r in results if r.get('is_young_researcher', False)]
+            
             logger.info(f"🌟 フィルタリング結果: {len(results)}件 → {len(filtered_results)}件")
             results = filtered_results
-        if use_internal_evaluation and results:
+
+        # --- AI要約 (フィルタリング後の結果に対して実行) ---
+        if request.use_llm_summary and results and vertex_ai_available:
             try:
-                evaluations = await evaluator.evaluate_researchers(results, request.query, use_internal_evaluation=True)
-                formatted_result = evaluator.format_for_ui(evaluations, request.max_results)
-                execution_time = time.time() - start_time
-                return { "status": "success", "query": request.query, "method": request.method, "evaluation_mode": "internal", "summary": formatted_result["summary"], "results": [], "evaluated_results": formatted_result["results"], "total": formatted_result["metadata"]["total_found"], "displayed": formatted_result["metadata"]["displayed"], "execution_time": execution_time, "executed_query_info": f"AI関連性分析実行 (方法: {request.method}, 実行時間: {execution_time:.2f}秒)", "expanded_info": expanded_info }
+                results = await add_llm_summaries(results, request.query)
+                logger.info("🤖 AI要約を追加完了")
             except Exception as e:
-                logger.error(f"❌ AI関連性分析でエラー: {e}")
-                import traceback
-                logger.error(f"スタックトレース: {traceback.format_exc()}")
-                use_internal_evaluation = False
-        if not use_internal_evaluation:
-            if use_ai_summary and results and vertex_ai_available:
-                try:
-                    results = await add_llm_summaries(results, request.query)
-                    logger.info("🤖 AI要約を追加完了")
-                except Exception as e: logger.warning(f"⚠️ AI要約生成失敗: {e}")
+                logger.warning(f"⚠️ AI要約生成失敗: {e}")
+
+        # --- レスポンス生成 ---
         execution_time = time.time() - start_time
-        executed_query_info = f"実際のGCP検索実行 (方法: {request.method}"
-        if use_internal_evaluation: executed_query_info += ", 評価モード: 内部評価"
-        if request.use_llm_expansion and vertex_ai_available and request.method != "semantic": executed_query_info += ", キーワード拡張: ON"
-        if use_ai_summary and vertex_ai_available: executed_query_info += ", AI要約: ON"
-        executed_query_info += f", 実行時間: {execution_time:.2f}秒)"
-        if expanded_info: logger.info(f"🏷️ レスポンスに拡張情報を含めます: {expanded_info}")
-        else: logger.info("🏷️ 拡張情報なし")
-        if results and len(results) > 0:
-            logger.info(f"🔍 最終結果返却前のデータ確認:")
-            first_result = results[0]
-            logger.info(f"  - 最初の結果のname: {first_result.get('name_ja', 'N/A')}")
-            logger.info(f"  - is_young_researcher: {first_result.get('is_young_researcher', 'MISSING')}")
-            logger.info(f"  - young_researcher_reasons: {first_result.get('young_researcher_reasons', 'MISSING')}")
-            logger.info(f"  - 結果のキー: {list(first_result.keys())}")
-        response_data = { "status": "success", "query": request.query, "method": request.method, "evaluation_mode": "legacy", "results": results, "total": len(results), "execution_time": execution_time, "executed_query_info": executed_query_info, "expanded_info": expanded_info }
-        logger.info(f"📦 APIレスポンスデータのキー: {list(response_data.keys())}")
-        return response_data
+        executed_query_info = f"実際のGCP検索実行 (方法: {request.method}, 実行時間: {execution_time:.2f}秒)"
+        
+        return {
+            "status": "success",
+            "query": request.query,
+            "method": request.method,
+            "results": results,
+            "total": len(results),
+            "execution_time": execution_time,
+            "executed_query_info": executed_query_info,
+            "expanded_info": expanded_info
+        }
+
     except Exception as e:
         logger.error(f"❌ 実際の検索でエラー: {e}")
-        return { "status": "error", "error_message": str(e), "execution_time": time.time() - start_time }
+        import traceback
+        logger.error(f"スタックトレース: {traceback.format_exc()}")
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "execution_time": time.time() - start_time
+        }
 
 # ▼▼▼ この関数をまるごと置き換えてください ▼▼▼
 async def semantic_search_with_embedding(bq_client: bigquery.Client, query: str, max_results: int, university_filter: Optional[List[str]] = None, exclude_keywords: Optional[List[str]] = None) -> List[Dict]:
