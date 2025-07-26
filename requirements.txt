@@ -1,0 +1,25 @@
+# 基本APIサーバー
+fastapi==0.104.1
+uvicorn==0.24.0
+
+# データ処理
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Google Cloud (段階的に追加)
+google-cloud-bigquery>=3.11.0
+google-cloud-aiplatform>=1.34.0
+vertexai>=1.38.0
+db-dtypes>=1.0.0
+pyarrow>=10.0.0
+
+# グラフ分析
+networkx>=2.6.0
+python-louvain>=0.16
+
+# 環境変数管理
+python-dotenv>=0.21.0
+
+# その他
+python-multipart>=0.0.6
+aiohttp>=3.8.0

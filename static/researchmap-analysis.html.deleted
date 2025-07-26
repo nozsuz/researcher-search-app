@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResearchMap詳細分析</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .researcher-info {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .researcher-name {
+            font-size: 2.5em;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .affiliation {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .scores-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .score-card {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+        
+        .score-value {
+            font-size: 2em;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .score-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .content-section {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+        }
+        
+        .section-title {
+            font-size: 1.5em;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .section-icon {
+            font-size: 1.2em;
+        }
+        
+        .analysis-text {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            white-space: pre-line;
+        }
+        
+        .keywords-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .keyword-tag {
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            border: 1px solid #bbdefb;
+        }
+        
+        .papers-list, .projects-list, .presentations-list, .patents-list {
+            list-style: none;
+        }
+        
+        .paper-item, .project-item, .presentation-item, .patent-item {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 4px solid #4caf50;
+            transition: transform 0.2s;
+        }
+        
+        .paper-item:hover, .project-item:hover, .presentation-item:hover, .patent-item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .paper-year, .project-period {
+            display: inline-block;
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            margin-bottom: 10px;
+        }
+        
+        .paper-title, .project-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+        
+        .paper-journal {
+            color: #666;
+            font-style: italic;
+        }
+        
+        .project-item {
+            border-left-color: #ff9800;
+        }
+        
+        .project-period {
+            background: #fff3e0;
+            color: #e65100;
+        }
+        
+        .presentation-item {
+            border-left-color: #9c27b0;
+        }
+        
+        .presentation-date {
+            background: #f3e5f5;
+            color: #6a1b9a;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            margin-bottom: 10px;
+            display: inline-block;
+        }
+        
+        .patent-item {
+            border-left-color: #2196f3;
+        }
+        
+        .patent-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .patent-info-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .patent-info-label {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 2px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 50px;
+            height: 50px;
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top-color: #667eea;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #f44336;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+            font-style: italic;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid #e9ecef;
+        }
+        
+        .stat-number {
+            font-size: 2em;
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>分析データを読み込んでいます...</p>
+        </div>
+        
+        <div id="content" style="display: none;">
+            <!-- ヘッダー部分 -->
+            <div class="header" id="header-section">
+                <div class="researcher-info">
+                    <div>
+                        <h1 class="researcher-name" id="researcher-name">読み込み中...</h1>
+                        <div class="affiliation" id="affiliation">所属情報読み込み中...</div>
+                    </div>
+                </div>
+                
+                <div class="scores-container" id="scores-container">
+                    <!-- スコアカードがここに動的に挿入される -->
+                </div>
+            </div>
+            
+            <!-- 統計情報 -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <span class="section-icon">📊</span>
+                    研究活動統計
+                </h2>
+                <div class="stats-grid" id="stats-grid">
+                    <!-- 統計カードがここに動的に挿入される -->
+                </div>
+            </div>
+            
+            <!-- AI分析結果 -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <span class="section-icon">🤖</span>
+                    AI詳細分析
+                </h2>
+                <div class="analysis-text" id="detailed-analysis">
+                    分析結果を読み込み中...
+                </div>
+            </div>
+            
+            <!-- 研究キーワード -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <span class="section-icon">🔍</span>
+                    研究キーワード
+                </h2>
+                <div class="keywords-container" id="keywords-container">
+                    <!-- キーワードタグがここに動的に挿入される -->
+                </div>
+            </div>
+            
+            <!-- 主要論文 -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <span class="section-icon">📄</span>
+                    主要論文
+                </h2>
+                <ul class="papers-list" id="papers-list">
+                    <!-- 論文リストがここに動的に挿入される -->
+                </ul>
+            </div>
+            
+            <!-- 主要プロジェクト -->
+            <div class="content-section">
+                <h2 class="section-title">
+                    <span class="section-icon">🚀</span>
+                    主要プロジェクト
+                </h2>
+                <ul class="projects-list" id="projects-list">
+                    <!-- プロジェクトリストがここに動的に挿入される -->
+                </ul>
+            </div>
+            
+            <!-- 最近の発表 -->
+            <div class="content-section" id="presentations-section" style="display: none;">
+                <h2 class="section-title">
+                    <span class="section-icon">🎤</span>
+                    最近の発表
+                </h2>
+                <ul class="presentations-list" id="presentations-list">
+                    <!-- 発表リストがここに動的に挿入される -->
+                </ul>
+            </div>
+            
+            <!-- 特許情報 -->
+            <div class="content-section" id="patents-section" style="display: none;">
+                <h2 class="section-title">
+                    <span class="section-icon">💡</span>
+                    主要特許
+                </h2>
+                <ul class="patents-list" id="patents-list">
+                    <!-- 特許リストがここに動的に挿入される -->
+                </ul>
+            </div>
+        </div>
+        
+        <div id="error" class="error-message" style="display: none;">
+            エラーが発生しました。データの読み込みに失敗しました。
+        </div>
+    </div>
+    
+    <script>
+        // URLパラメータから分析データを取得
+        function getAnalysisData() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const encodedData = urlParams.get('data');
+            
+            if (encodedData) {
+                try {
+                    // Base64デコード
+                    const jsonString = atob(encodedData);
+                    return JSON.parse(jsonString);
+                } catch (e) {
+                    console.error('データのデコードに失敗しました:', e);
+                    return null;
+                }
+            }
+            
+            // データがない場合はデモデータを表示
+            return getDemoData();
+        }
+        
+        // デモデータ
+        function getDemoData() {
+            return {
+                researcher_name: "山田 太郎",
+                affiliation: "東京大学 工学部",
+                scores: {
+                    total: 85,
+                    technical_relevance: 34,
+                    achievements: 26,
+                    practical_applicability: 25
+                },
+                research_keywords: ["人工知能", "機械学習", "深層学習", "自然言語処理", "コンピュータビジョン"],
+                total_papers: 45,
+                total_projects: 8,
+                total_awards: 3,
+                total_presentations: 12,
+                total_patents: 5,
+                detailed_analysis: "この研究者は「人工知能」に関する専門的な研究を行っており、特に以下の点で優れています：\n\n1. 技術的関連性：人工知能に直接関連する論文を複数発表しており、その研究内容は要求される技術領域と高い整合性を持っています。特に深層学習と自然言語処理の分野で顕著な成果を上げています。\n\n2. 実績・影響力：Nature Machine IntelligenceやICML等のトップジャーナル・会議への掲載実績があり、複数の特許取得や学会賞受賞歴があるなど、研究成果の質の高さが認められます。\n\n3. 実用化可能性：産学連携プロジェクトの経験が豊富で、企業との共同研究を通じて研究成果の社会実装に向けた実績があります。特にAIの医療応用に関するプロジェクトで実用化に成功しています。\n\n総合的に、この研究者は人工知能の分野で非常に高い専門性と実績を持っており、プロジェクトへの貢献が大いに期待できます。",
+                top_papers: [
+                    {
+                        year: 2023,
+                        title_ja: "深層学習を用いた医療画像診断支援システムの開発",
+                        journal: "Nature Machine Intelligence"
+                    },
+                    {
+                        year: 2022,
+                        title_ja: "大規模言語モデルの効率的な学習手法に関する研究",
+                        journal: "ICML 2022"
+                    },
+                    {
+                        year: 2021,
+                        title_ja: "説明可能AIのための新しいアプローチ",
+                        journal: "IEEE Transactions on Neural Networks"
+                    }
+                ],
+                key_projects: [
+                    {
+                        title: "JST CREST AIによる次世代医療診断システム",
+                        period: "2021-2024"
+                    },
+                    {
+                        title: "NEDO AI社会実装プロジェクト",
+                        period: "2020-2023"
+                    },
+                    {
+                        title: "科研費基盤(A) 説明可能AIの基礎理論",
+                        period: "2019-2022"
+                    }
+                ],
+                recent_presentations: [
+                    {
+                        title: "医療AIの最新動向と今後の展望",
+                        event: "日本人工知能学会全国大会",
+                        date: "2023-06-08",
+                        type: "招待講演"
+                    },
+                    {
+                        title: "Deep Learning for Medical Image Analysis",
+                        event: "CVPR 2023",
+                        date: "2023-06-20",
+                        type: "口頭発表"
+                    }
+                ],
+                key_patents: [
+                    {
+                        title: "深層学習を用いた医療画像解析装置及び方法",
+                        application_number: "特願2023-123456",
+                        patent_number: "特許第6789012号",
+                        application_date: "2023/04/01",
+                        inventors: "山田太郎、鈴木花子、佐藤次郎"
+                    },
+                    {
+                        title: "自然言語処理による診断支援システム",
+                        application_number: "特願2022-987654",
+                        patent_number: "（審査中）",
+                        application_date: "2022/09/15",
+                        inventors: "山田太郎、田中一郎"
+                    },
+                    {
+                        title: "AIを活用した異常検知方法",
+                        application_number: "特願2021-555555",
+                        patent_number: "特許第6543210号",
+                        application_date: "2021/12/01",
+                        inventors: "山田太郎"
+                    }
+                ]
+            };
+        }
+        
+        // データを表示
+        function displayData(data) {
+            // ヘッダー情報
+            document.getElementById('researcher-name').textContent = data.researcher_name || '名前不明';
+            document.getElementById('affiliation').textContent = data.affiliation || '所属不明';
+            
+            // スコア表示
+            if (data.scores) {
+                const scoresContainer = document.getElementById('scores-container');
+                scoresContainer.innerHTML = `
+                    <div class="score-card">
+                        <div class="score-value">${data.scores.total || 0}</div>
+                        <div class="score-label">総合スコア</div>
+                    </div>
+                    <div class="score-card">
+                        <div class="score-value">${data.scores.technical_relevance || 0}/40</div>
+                        <div class="score-label">技術的関連性</div>
+                    </div>
+                    <div class="score-card">
+                        <div class="score-value">${data.scores.achievements || 0}/30</div>
+                        <div class="score-label">実績・影響力</div>
+                    </div>
+                    <div class="score-card">
+                        <div class="score-value">${data.scores.practical_applicability || 0}/30</div>
+                        <div class="score-label">実用化可能性</div>
+                    </div>
+                `;
+            }
+            
+            // 統計情報
+            const statsGrid = document.getElementById('stats-grid');
+            statsGrid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-number">${data.total_papers || 0}</div>
+                    <div class="stat-label">論文数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${data.total_projects || 0}</div>
+                    <div class="stat-label">プロジェクト数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${data.total_awards || 0}</div>
+                    <div class="stat-label">受賞歴</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${data.total_presentations || 0}</div>
+                    <div class="stat-label">発表数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${data.total_patents || 0}</div>
+                    <div class="stat-label">特許数</div>
+                </div>
+            `;
+            
+            // 詳細分析
+            document.getElementById('detailed-analysis').textContent = data.detailed_analysis || '分析結果なし';
+            
+            // 研究キーワード
+            if (data.research_keywords && data.research_keywords.length > 0) {
+                const keywordsContainer = document.getElementById('keywords-container');
+                keywordsContainer.innerHTML = data.research_keywords
+                    .map(keyword => `<span class="keyword-tag">${keyword}</span>`)
+                    .join('');
+            }
+            
+            // 主要論文
+            if (data.top_papers && data.top_papers.length > 0) {
+                const papersList = document.getElementById('papers-list');
+                papersList.innerHTML = data.top_papers
+                    .map(paper => `
+                        <li class="paper-item">
+                            <span class="paper-year">${paper.year}</span>
+                            <div class="paper-title">${paper.title_ja || paper.title_en || '題名なし'}</div>
+                            <div class="paper-journal">${paper.journal || '掲載誌不明'}</div>
+                        </li>
+                    `)
+                    .join('');
+            } else {
+                document.getElementById('papers-list').innerHTML = '<li class="empty-state">論文情報がありません</li>';
+            }
+            
+            // 主要プロジェクト
+            if (data.key_projects && data.key_projects.length > 0) {
+                const projectsList = document.getElementById('projects-list');
+                projectsList.innerHTML = data.key_projects
+                    .map(project => `
+                        <li class="project-item">
+                            <span class="project-period">${project.period}</span>
+                            <div class="project-title">${project.title}</div>
+                        </li>
+                    `)
+                    .join('');
+            } else {
+                document.getElementById('projects-list').innerHTML = '<li class="empty-state">プロジェクト情報がありません</li>';
+            }
+            
+            // 最近の発表（データがある場合のみ表示）
+            if (data.recent_presentations && data.recent_presentations.length > 0) {
+                document.getElementById('presentations-section').style.display = 'block';
+                const presentationsList = document.getElementById('presentations-list');
+                presentationsList.innerHTML = data.recent_presentations
+                    .map(pres => `
+                        <li class="presentation-item">
+                            <span class="presentation-date">${pres.date} - ${pres.type}</span>
+                            <div class="paper-title">${pres.title}</div>
+                            <div class="paper-journal">${pres.event}</div>
+                        </li>
+                    `)
+                    .join('');
+            }
+            
+            // 特許情報（データがある場合のみ表示）
+            if (data.key_patents && data.key_patents.length > 0) {
+                document.getElementById('patents-section').style.display = 'block';
+                const patentsList = document.getElementById('patents-list');
+                patentsList.innerHTML = data.key_patents
+                    .map(patent => `
+                        <li class="patent-item">
+                            <div class="paper-title">${patent.title}</div>
+                            <div class="patent-info">
+                                <div class="patent-info-item">
+                                    <span class="patent-info-label">出願番号</span>
+                                    <span>${patent.application_number || '不明'}</span>
+                                </div>
+                                <div class="patent-info-item">
+                                    <span class="patent-info-label">特許番号</span>
+                                    <span>${patent.patent_number || '（審査中）'}</span>
+                                </div>
+                                <div class="patent-info-item">
+                                    <span class="patent-info-label">出願日</span>
+                                    <span>${patent.application_date || '不明'}</span>
+                                </div>
+                                <div class="patent-info-item">
+                                    <span class="patent-info-label">発明者</span>
+                                    <span>${patent.inventors || '不明'}</span>
+                                </div>
+                            </div>
+                        </li>
+                    `)
+                    .join('');
+            }
+        }
+        
+        // ページ読み込み時の処理
+        window.addEventListener('DOMContentLoaded', function() {
+            const data = getAnalysisData();
+            
+            if (data) {
+                displayData(data);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            } else {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
