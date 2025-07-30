@@ -351,9 +351,11 @@ class UniversalResearchEvaluator:
 研究者情報:
 名前: {researcher.get('name_ja', '')}
 所属: {researcher.get('main_affiliation_name_ja', '')}
+研究分野: {researcher.get('research_fields_ja', '')}
 研究キーワード: {researcher.get('research_keywords_ja', '')}
 プロフィール: {str(researcher.get('profile_ja', ''))[:400] if researcher.get('profile_ja') else ''}
 主要論文: {researcher.get('paper_title_ja_first', '')}
+主要プロジェクト: {researcher.get('project_title_ja_first', '')}
 """
         prompt = f"""
 以下の研究者情報を基に、研究キーワード、プロフィール、主要論文、主要プロジェクトを踏まえて、検索クエリ「{query}」との関連性を200字程度で要約してください。要約文のみを出力してください。
