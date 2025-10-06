@@ -37,6 +37,11 @@ app = FastAPI(
     description="AI研究者検索システムのAPIエンドポイント",
     version="2.1.1"
 )
+# 余計なリダイレクトを防ぐ
+app.router.redirect_slashes = False
+
+# 本番/プレビューの Vercel を許可
+ALLOWED_ORIGIN_REGEX = r"^https:\/\/research-partner-dashboard(?:-[a-z0-9-]+)?\.vercel\.app$"
 
 # CORS設定
 app.add_middleware(
