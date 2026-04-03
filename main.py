@@ -99,6 +99,7 @@ class ResearcherResult(BaseModel):
     researchmap_url: Optional[str] = None
     relevance_score: Optional[float] = None
     distance: Optional[float] = None
+    keyword_contributions: Optional[List[Dict[str, Any]]] = None
     llm_summary: Optional[str] = None
     is_young_researcher: Optional[bool] = None
     young_researcher_reasons: Optional[List[str]] = None
