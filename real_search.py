@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from google.cloud import bigquery
-from vertexai.language_models import TextGenerationModel, TextEmbeddingModel
+from vertexai.language_models import TextEmbeddingModel
 from vertexai.generative_models import GenerativeModel
 import numpy as np
 from evaluation_system import UniversalResearchEvaluator
@@ -498,11 +498,10 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
         raise
 
 async def expand_query_with_llm(query: str) -> Dict[str, Any]:
-    # (この関数は変更ありません)
     try:
         logger.info(f"🤖 LLMクエリ拡張開始: {query}")
         try:
-            model = GenerativeModel("gemini-2.0-flash-001")
+            model = GenerativeModel("gemini-2.5-flash-lite")
             prompt = f"""あなたは学術研究データベースの検索アシスタントです。 ユーザーが入力した「元のキーワード」について、そのキーワードを含む研究情報をより効果的に見つけるために、 関連性の高い類義語、上位/下位概念語、英語の対応語（もしあれば）、具体的な技術名や物質名などを考慮し、 検索に有効そうなキーワードを最大10個提案してください。 提案は日本語の単語または短いフレーズで、カンマ区切りで出力してください。元のキーワード自体も提案に含めてください。 元のキーワード: 「{query}」 提案:"""
             response = model.generate_content(prompt, generation_config={ "temperature": 0.2, "max_output_tokens": 200, "top_p": 0.8, "top_k": 40 })
             expanded_text = response.text.strip()
@@ -512,22 +511,22 @@ async def expand_query_with_llm(query: str) -> Dict[str, Any]:
                 if query not in expanded_keywords: final_keywords.append(query)
                 for kw in expanded_keywords:
                     if kw not in final_keywords: final_keywords.append(kw)
-                logger.info(f"✅ LLMクエリ拡張完了 (gemini-2.0-flash-001): {final_keywords}")
+                logger.info(f"✅ LLMクエリ拡張完了 (gemini-2.5-flash-lite): {final_keywords}")
                 return { "original_query": query, "expanded_keywords": final_keywords, "expanded_query": ' '.join(final_keywords[:5]) }
         except Exception as e:
-            logger.warning(f"⚠️ Gemini 2.0 Flash失敗: {e}")
+            logger.warning(f"⚠️ Gemini 2.5 Flash Lite失敗: {e}")
             try:
-                model = TextGenerationModel.from_pretrained("text-bison@002")
+                model = GenerativeModel("gemini-2.5-flash")
                 prompt = f"""研究キーワード「{query}」に関連する学術用語を5-10個提案してください。カンマ区切りで出力してください。 元のキーワード: {query} 関連キーワード:"""
-                response = model.predict(prompt, temperature=0.2, max_output_tokens=200, top_p=0.8, top_k=40)
+                response = model.generate_content(prompt, generation_config={ "temperature": 0.2, "max_output_tokens": 200, "top_p": 0.8, "top_k": 40 })
                 expanded_text = response.text.strip()
                 if expanded_text:
                     expanded_keywords = [kw.strip() for kw in expanded_text.split(',') if kw.strip()]
                     final_keywords = [query] if query not in expanded_keywords else []
                     final_keywords.extend([kw for kw in expanded_keywords if kw not in final_keywords])
-                    logger.info(f"✅ LLMクエリ拡張完了 (text-bison@002): {final_keywords}")
+                    logger.info(f"✅ LLMクエリ拡張完了 (gemini-2.5-flash): {final_keywords}")
                     return { "original_query": query, "expanded_keywords": final_keywords, "expanded_query": ' '.join(final_keywords[:5]) }
-            except Exception as e2: logger.warning(f"⚠️ Text-Bison フォールバック失敗: {e2}")
+            except Exception as e2: logger.warning(f"⚠️ Gemini 2.5 Flash フォールバック失敗: {e2}")
         logger.warning("⚠️ すべてのLLMモデルでクエリ拡張に失敗")
         return { "original_query": query, "expanded_keywords": [query], "expanded_query": query }
     except Exception as e:
@@ -535,19 +534,18 @@ async def expand_query_with_llm(query: str) -> Dict[str, Any]:
         return { "original_query": query, "expanded_keywords": [query], "expanded_query": query }
 
 async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
-    # (この関数は変更ありません)
     try:
         logger.info(f"🤖 LLM要約生成開始: {len(results)}名の研究者")
         model, model_name = None, ""
         try:
-            model = GenerativeModel("gemini-2.0-flash-lite-001")
-            model_name = "gemini-2.0-flash-lite-001"
+            model = GenerativeModel("gemini-2.5-flash-lite")
+            model_name = "gemini-2.5-flash-lite"
             logger.info(f"✅ 軽量LLMモデル {model_name} を使用")
         except Exception as e:
-            logger.warning(f"⚠️ Gemini 2.0 Flash Lite失敗: {e}")
+            logger.warning(f"⚠️ Gemini 2.5 Flash Lite失敗: {e}")
             try:
-                model = TextGenerationModel.from_pretrained("text-bison@002")
-                model_name = "text-bison@002"
+                model = GenerativeModel("gemini-2.5-flash")
+                model_name = "gemini-2.5-flash"
                 logger.info(f"✅ LLMモデル {model_name} を使用")
             except Exception as e2:
                 logger.error(f"❌ フォールバックモデル失敗: {e2}")
@@ -560,13 +558,8 @@ async def add_llm_summaries(results: List[Dict], query: str) -> List[Dict]:
                 if idx > 0: time.sleep(0.5)
                 name, affiliation, keywords, fields, profile, paper, project = result.get('name_ja', ''), result.get('main_affiliation_name_ja', ''), result.get('research_keywords_ja', ''), result.get('research_fields_ja', ''), str(result.get('profile_ja', ''))[:300], result.get('paper_title_ja_first', ''), result.get('project_title_ja_first', '')
                 prompt = f"""研究者情報:\n名前: {name} ({affiliation})\n研究キーワード: {keywords}\n研究分野: {fields}\nプロフィール: {profile}\n主要論文: {paper}\n主要プロジェクト: {project}\n\n検索クエリ: 「{query}」\n\n上記の研究キーワード、プロフィール、主要論文、主要プロジェクトを踏まえて、 この研究者と検索クエリとの関連性を200字程度で分析してください。"""
-                summary = ""
-                if "gemini" in model_name:
-                    response = model.generate_content(prompt, generation_config={ "temperature": 0.1, "max_output_tokens": 200, "top_p": 0.8 })
-                    summary = response.text.strip()
-                else:
-                    response = model.predict(prompt, temperature=0.1, max_output_tokens=200, top_p=0.8)
-                    summary = response.text.strip()
+                response = model.generate_content(prompt, generation_config={ "temperature": 0.1, "max_output_tokens": 200, "top_p": 0.8 })
+                summary = response.text.strip()
                 if summary: result["llm_summary"] = summary
                 else: result["llm_summary"] = f"「{query}」に関連する研究を行っています。"
             except Exception as e:
