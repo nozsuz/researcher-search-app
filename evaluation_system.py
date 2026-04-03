@@ -9,7 +9,6 @@ import time
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from vertexai.generative_models import GenerativeModel
-from vertexai.language_models import TextGenerationModel
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +44,14 @@ class UniversalResearchEvaluator:
     def _initialize_llm(self):
         """LLMモデルの初期化"""
         try:
-            # Gemini 2.5 Flash Lite（推奨後継モデル）
+            # Gemini 2.5 Flash Liteを優先（2.0系は2026-03-06以降新規利用不可）
             self.model = GenerativeModel("gemini-2.5-flash-lite")
             self.model_name = "gemini-2.5-flash-lite"
             logger.info(f"✅ 評価用LLMモデル初期化: {self.model_name}")
         except Exception as e:
             logger.warning(f"⚠️ Gemini 2.5 Flash Lite初期化失敗: {e}")
             try:
+                # フォールバック
                 self.model = GenerativeModel("gemini-2.5-flash")
                 self.model_name = "gemini-2.5-flash"
                 logger.info(f"✅ フォールバックLLMモデル初期化: {self.model_name}")
@@ -115,24 +115,15 @@ class UniversalResearchEvaluator:
         prompt = self._create_batch_evaluation_prompt(researchers, query)
         
         try:
-            if "gemini" in self.model_name:
-                response = self.model.generate_content(
-                    prompt,
-                    generation_config={
-                        "temperature": 0.1,
-                        "max_output_tokens": 2048,
-                        "top_p": 0.8
-                    }
-                )
-                evaluation_text = response.text
-            else:
-                response = self.model.predict(
-                    prompt,
-                    temperature=0.1,
-                    max_output_tokens=2048,
-                    top_p=0.8
-                )
-                evaluation_text = response.text
+            response = self.model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.1,
+                    "max_output_tokens": 2048,
+                    "top_p": 0.8
+                }
+            )
+            evaluation_text = response.text
             
             # JSON形式の評価結果をパース
             evaluations = self._parse_evaluation_response(evaluation_text, researchers, query)
@@ -331,12 +322,8 @@ class UniversalResearchEvaluator:
             
             logger.info(f"単独要約生成のためLLMを呼び出し: {researcher_data.get('name_ja')} (Query: {query})")
             
-            if "gemini" in self.model_name:
-                response = self.model.generate_content(prompt, generation_config={"temperature": 0.2})
-                summary = response.text
-            else: # Fallback for text-bison
-                response = self.model.predict(prompt, temperature=0.2)
-                summary = response.text
+            response = self.model.generate_content(prompt, generation_config={"temperature": 0.2})
+            summary = response.text
             
             return summary.strip()
 
