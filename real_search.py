@@ -431,21 +431,64 @@ def calculate_cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
         return 0.0
 
 async def keyword_search(bq_client: bigquery.Client, query: str, max_results: int, university_filter: Optional[List[str]] = None, exclude_keywords: Optional[List[str]] = None) -> List[Dict]:
-    # (この関数は変更ありません)
+    """
+    キーワード検索（キーワード別寄与度分解対応版）
+    各キーワードのスコアをフィールド別に分解して返す。
+    """
     try:
         logger.info(f"🔍 キーワード検索実行: {query}")
         keywords = [kw.strip() for kw in query.split() if kw.strip()]
         logger.info(f"📝 検索キーワード: {keywords}")
+
+        # --- WHERE句: いずれかのキーワードがいずれかのフィールドに含まれる ---
         like_conditions = []
         for keyword in keywords:
             safe_keyword = keyword.replace("'", "''")
-            like_conditions.extend([ f"LOWER(research_keywords_ja) LIKE LOWER('%{safe_keyword}%')", f"LOWER(research_fields_ja) LIKE LOWER('%{safe_keyword}%')", f"LOWER(profile_ja) LIKE LOWER('%{safe_keyword}%')", f"LOWER(name_ja) LIKE LOWER('%{safe_keyword}%')", f"LOWER(paper_title_ja_first) LIKE LOWER('%{safe_keyword}%')", f"LOWER(project_title_ja_first) LIKE LOWER('%{safe_keyword}%')" ])
+            like_conditions.extend([
+                f"LOWER(research_keywords_ja) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(research_fields_ja) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(profile_ja) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(name_ja) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(paper_title_ja_first) LIKE LOWER('%{safe_keyword}%')",
+                f"LOWER(project_title_ja_first) LIKE LOWER('%{safe_keyword}%')"
+            ])
         where_clause = " OR ".join(like_conditions)
-        relevance_scores = []
-        for keyword in keywords:
+
+        # --- キーワード別・フィールド別スコアのSQL生成 ---
+        # 各キーワードについて合計スコアと、フィールド別の個別スコアをSELECTカラムとして生成
+        relevance_scores = []          # 合計スコア計算用（ORDER BY用）
+        kw_score_columns = []          # キーワード別合計スコアカラム
+        kw_field_score_columns = []    # キーワード×フィールド別スコアカラム
+
+        field_definitions = [
+            ("name_ja", 10, "名前"),
+            ("research_keywords_ja", 8, "キーワード"),
+            ("research_fields_ja", 6, "研究分野"),
+            ("paper_title_ja_first", 5, "論文タイトル"),
+            ("project_title_ja_first", 5, "プロジェクト"),
+            ("profile_ja", 4, "プロフィール"),
+        ]
+
+        for i, keyword in enumerate(keywords):
             safe_keyword = keyword.replace("'", "''")
-            relevance_scores.append(f""" ( CASE WHEN LOWER(name_ja) LIKE LOWER('%{safe_keyword}%') THEN 10 ELSE 0 END + CASE WHEN LOWER(research_keywords_ja) LIKE LOWER('%{safe_keyword}%') THEN 8 ELSE 0 END + CASE WHEN LOWER(research_fields_ja) LIKE LOWER('%{safe_keyword}%') THEN 6 ELSE 0 END + CASE WHEN LOWER(paper_title_ja_first) LIKE LOWER('%{safe_keyword}%') THEN 5 ELSE 0 END + CASE WHEN LOWER(project_title_ja_first) LIKE LOWER('%{safe_keyword}%') THEN 5 ELSE 0 END + CASE WHEN LOWER(profile_ja) LIKE LOWER('%{safe_keyword}%') THEN 4 ELSE 0 END ) """)
+
+            # キーワード別合計（従来と同じ計算）
+            field_cases = []
+            for field_col, weight, _ in field_definitions:
+                case_expr = f"CASE WHEN LOWER({field_col}) LIKE LOWER('%{safe_keyword}%') THEN {weight} ELSE 0 END"
+                field_cases.append(case_expr)
+                # フィールド別個別スコアもSELECTカラムとして追加
+                kw_field_score_columns.append(
+                    f"({case_expr}) AS kw{i}_{field_col}_score"
+                )
+
+            kw_total_expr = " + ".join(field_cases)
+            relevance_scores.append(f"({kw_total_expr})")
+            kw_score_columns.append(f"({kw_total_expr}) AS kw{i}_score")
+
         total_relevance_score = " + ".join(relevance_scores) if relevance_scores else "0"
+
+        # --- 大学フィルター条件 ---
         university_condition = ""
         if university_filter and len(university_filter) > 0:
             try:
@@ -457,41 +500,100 @@ async def keyword_search(bq_client: bigquery.Client, query: str, max_results: in
             except Exception as e:
                 logger.warning(f"⚠️ 大学正規化システムエラー、シンプルフィルターを使用: {e}")
                 safe_universities = [univ.replace("'", "''") for univ in university_filter]
-                like_conditions = [f"main_affiliation_name_ja LIKE '%{univ}%'" for univ in safe_universities]
-                university_condition = f" AND ({' OR '.join(like_conditions)})"
+                like_conds = [f"main_affiliation_name_ja LIKE '%{univ}%'" for univ in safe_universities]
+                university_condition = f" AND ({' OR '.join(like_conds)})"
+
+        # --- 除外キーワード条件 ---
         exclude_condition = ""
         if exclude_keywords:
             conditions = []
             for keyword in exclude_keywords:
                 safe_keyword = keyword.replace("'", "''")
-                conditions.append(f""" NOT ( LOWER(research_keywords_ja) LIKE LOWER('%{safe_keyword}%') OR LOWER(research_fields_ja) LIKE LOWER('%{safe_keyword}%') OR LOWER(profile_ja) LIKE LOWER('%{safe_keyword}%') ) """)
-            if conditions: exclude_condition = f" AND {' AND '.join(conditions)}"
-        search_sql = f""" SELECT name_ja, name_en, main_affiliation_name_ja, main_affiliation_name_en, main_affiliation_job_ja, main_affiliation_job_title_ja, main_affiliation_job_en, main_affiliation_job_title_en, research_keywords_ja, research_fields_ja, profile_ja, paper_title_ja_first, project_title_ja_first, researchmap_url, ({total_relevance_score}) as relevance_score FROM `apt-rope-217206.researcher_data.rd_250524` WHERE ({where_clause}){university_condition}{exclude_condition} ORDER BY relevance_score DESC, name_ja LIMIT {max_results} """
+                conditions.append(f"""
+                    NOT (
+                        LOWER(research_keywords_ja) LIKE LOWER('%{safe_keyword}%') OR
+                        LOWER(research_fields_ja) LIKE LOWER('%{safe_keyword}%') OR
+                        LOWER(profile_ja) LIKE LOWER('%{safe_keyword}%')
+                    )
+                """)
+            if conditions:
+                exclude_condition = f" AND {' AND '.join(conditions)}"
+
+        # --- SQL構築: 基本フィールド + 合計スコア + キーワード別スコア + フィールド別スコア ---
+        extra_columns = ", ".join(kw_score_columns + kw_field_score_columns)
+        if extra_columns:
+            extra_columns = ", " + extra_columns
+
+        search_sql = f"""
+            SELECT
+                name_ja, name_en,
+                main_affiliation_name_ja, main_affiliation_name_en,
+                main_affiliation_job_ja, main_affiliation_job_title_ja,
+                main_affiliation_job_en, main_affiliation_job_title_en,
+                research_keywords_ja, research_fields_ja, profile_ja,
+                paper_title_ja_first, project_title_ja_first, researchmap_url,
+                ({total_relevance_score}) AS relevance_score
+                {extra_columns}
+            FROM `apt-rope-217206.researcher_data.rd_250524`
+            WHERE ({where_clause}){university_condition}{exclude_condition}
+            ORDER BY relevance_score DESC, name_ja
+            LIMIT {max_results}
+        """
+
+        logger.info(f"Generated SQL for Keyword Search (with contributions)")
         query_job = bq_client.query(search_sql)
         results = []
+
         for row in query_job:
-            researcher_data = { "name_ja": row.name_ja, "name_en": row.name_en, "main_affiliation_name_ja": row.main_affiliation_name_ja, "main_affiliation_name_en": row.main_affiliation_name_en, "main_affiliation_job_ja": row.main_affiliation_job_ja, "main_affiliation_job_title_ja": row.main_affiliation_job_title_ja, "main_affiliation_job_en": row.main_affiliation_job_en, "main_affiliation_job_title_en": row.main_affiliation_job_title_en, "research_keywords_ja": row.research_keywords_ja, "research_fields_ja": row.research_fields_ja, "profile_ja": row.profile_ja, "paper_title_ja_first": row.paper_title_ja_first, "project_title_ja_first": row.project_title_ja_first, "researchmap_url": row.researchmap_url, "relevance_score": float(row.relevance_score) if row.relevance_score else None }
+            researcher_data = {
+                "name_ja": row.name_ja,
+                "name_en": row.name_en,
+                "main_affiliation_name_ja": row.main_affiliation_name_ja,
+                "main_affiliation_name_en": row.main_affiliation_name_en,
+                "main_affiliation_job_ja": row.main_affiliation_job_ja,
+                "main_affiliation_job_title_ja": row.main_affiliation_job_title_ja,
+                "main_affiliation_job_en": row.main_affiliation_job_en,
+                "main_affiliation_job_title_en": row.main_affiliation_job_title_en,
+                "research_keywords_ja": row.research_keywords_ja,
+                "research_fields_ja": row.research_fields_ja,
+                "profile_ja": row.profile_ja,
+                "paper_title_ja_first": row.paper_title_ja_first,
+                "project_title_ja_first": row.project_title_ja_first,
+                "researchmap_url": row.researchmap_url,
+                "relevance_score": float(row.relevance_score) if row.relevance_score else None,
+            }
+
+            # --- キーワード別寄与度の構築 ---
+            keyword_contributions = []
+            for i, keyword in enumerate(keywords):
+                kw_total = getattr(row, f"kw{i}_score", 0) or 0
+                field_scores = {}
+                for field_col, weight, field_label in field_definitions:
+                    score_val = getattr(row, f"kw{i}_{field_col}_score", 0) or 0
+                    if score_val > 0:
+                        field_scores[field_label] = int(score_val)
+                keyword_contributions.append({
+                    "keyword": keyword,
+                    "score": int(kw_total),
+                    "field_scores": field_scores,
+                })
+            researcher_data["keyword_contributions"] = keyword_contributions
+
+            # --- 若手研究者判定 ---
             is_young, young_reasons = is_young_researcher(researcher_data)
             researcher_data["is_young_researcher"] = is_young
             researcher_data["young_researcher_reasons"] = young_reasons
-            if '後藤' in researcher_data.get('name_ja', '') or '小松' in researcher_data.get('name_ja', ''):
-                logger.info(f"🔍 検索 - {researcher_data.get('name_ja')}氏のデータ: ")
-                logger.info(f"  - main_affiliation_job_ja: {researcher_data.get('main_affiliation_job_ja', 'NULL/MISSING')}")
-                logger.info(f"  - main_affiliation_job_title_ja: {researcher_data.get('main_affiliation_job_title_ja', 'NULL/MISSING')}")
-                logger.info(f"  - is_young_researcher: {is_young}")
-                logger.info(f"  - young_researcher_reasons: {young_reasons}")
-                logger.info(f"  - profile_ja[:300]: {str(researcher_data.get('profile_ja', ''))[:300]}")
-                logger.info(f"  - 全フィールド: {list(researcher_data.keys())}")
-                if 'main_affiliation_job_ja' not in researcher_data: logger.warning(f"  ⚠️ main_affiliation_job_ja カラムが存在しません！")
+
             results.append(researcher_data)
-        logger.info(f"✅ キーワード検索完了: {len(results)}件")
+
+        logger.info(f"✅ キーワード検索完了: {len(results)}件 (寄与度分解付き)")
         if results and len(results) > 0:
             first_result = results[0]
             logger.info(f"🔍 キーワード検索結果の最初のデータ:")
             logger.info(f"  - name_ja: {first_result.get('name_ja', 'N/A')}")
+            logger.info(f"  - relevance_score: {first_result.get('relevance_score', 'N/A')}")
+            logger.info(f"  - keyword_contributions: {first_result.get('keyword_contributions', 'MISSING')}")
             logger.info(f"  - is_young_researcher: {first_result.get('is_young_researcher', 'MISSING')}")
-            logger.info(f"  - young_researcher_reasons: {first_result.get('young_researcher_reasons', 'MISSING')}")
-            logger.info(f"  - キーリスト: {list(first_result.keys())}")
         return results
     except Exception as e:
         logger.error(f"❌ キーワード検索エラー: {e}")
