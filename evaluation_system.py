@@ -42,22 +42,22 @@ class UniversalResearchEvaluator:
         self.model = None
         self._initialize_llm()
     
-def _initialize_llm(self):
-    """LLMモデルの初期化"""
-    try:
-        # Gemini 2.5 Flash Lite（推奨後継モデル）
-        self.model = GenerativeModel("gemini-2.5-flash-lite")
-        self.model_name = "gemini-2.5-flash-lite"
-        logger.info(f"✅ 評価用LLMモデル初期化: {self.model_name}")
-    except Exception as e:
-        logger.warning(f"⚠️ Gemini 2.5 Flash Lite初期化失敗: {e}")
+    def _initialize_llm(self):
+        """LLMモデルの初期化"""
         try:
-            self.model = GenerativeModel("gemini-2.5-flash")
-            self.model_name = "gemini-2.5-flash"
-            logger.info(f"✅ フォールバックLLMモデル初期化: {self.model_name}")
-        except Exception as e2:
-            logger.error(f"❌ LLMモデル初期化失敗: {e2}")
-            self.model = None
+            # Gemini 2.5 Flash Lite（推奨後継モデル）
+            self.model = GenerativeModel("gemini-2.5-flash-lite")
+            self.model_name = "gemini-2.5-flash-lite"
+            logger.info(f"✅ 評価用LLMモデル初期化: {self.model_name}")
+        except Exception as e:
+            logger.warning(f"⚠️ Gemini 2.5 Flash Lite初期化失敗: {e}")
+            try:
+                self.model = GenerativeModel("gemini-2.5-flash")
+                self.model_name = "gemini-2.5-flash"
+                logger.info(f"✅ フォールバックLLMモデル初期化: {self.model_name}")
+            except Exception as e2:
+                logger.error(f"❌ LLMモデル初期化失敗: {e2}")
+                self.model = None
     
     async def evaluate_researchers(
         self, 
