@@ -15,11 +15,9 @@ import itertools
 from collections import Counter
 try:
     from vertexai.generative_models import GenerativeModel
-    from vertexai.language_models import TextGenerationModel
     VERTEX_AI_AVAILABLE = True
 except ImportError:
     GenerativeModel = None
-    TextGenerationModel = None
     VERTEX_AI_AVAILABLE = False
 
 # --- グラフ解析ライブラリをインポート ---
@@ -77,16 +75,16 @@ class ResearchMapAnalyzer:
             return
             
         try:
-            # Gemini 2.0 Flash Liteを優先
-            self.llm_model = GenerativeModel("gemini-2.0-flash-lite-001")
-            self.model_name = "gemini-2.0-flash-lite-001"
+            # Gemini 2.5 Flash Liteを優先（2.0系は2026-03-06以降新規利用不可）
+            self.llm_model = GenerativeModel("gemini-2.5-flash-lite")
+            self.model_name = "gemini-2.5-flash-lite"
             logger.info(f"✅ 分析用LLMモデル初期化: {self.model_name}")
         except Exception as e:
-            logger.warning(f"⚠️ Gemini 2.0 Flash Lite初期化失敗: {e}")
+            logger.warning(f"⚠️ Gemini 2.5 Flash Lite初期化失敗: {e}")
             try:
                 # フォールバック
-                self.llm_model = TextGenerationModel.from_pretrained("text-bison@002")
-                self.model_name = "text-bison@002"
+                self.llm_model = GenerativeModel("gemini-2.5-flash")
+                self.model_name = "gemini-2.5-flash"
                 logger.info(f"✅ フォールバックLLMモデル初期化: {self.model_name}")
             except Exception as e2:
                 logger.error(f"❌ LLMモデル初期化失敗: {e2}")
@@ -935,20 +933,11 @@ Frequent Word 2; 80
         if not self.llm_model:
             return ""
         try:
-            if "gemini" in self.model_name:
-                response = await self.llm_model.generate_content_async(
-                    prompt,
-                    generation_config={"temperature": 0.2, "max_output_tokens": max_tokens, "top_p": 0.8}
-                )
-                return response.text.strip()
-            else:
-                response = self.llm_model.predict(
-                    prompt,
-                    temperature=0.2,
-                    max_output_tokens=max_tokens,
-                    top_p=0.8
-                )
-                return response.text.strip()
+            response = await self.llm_model.generate_content_async(
+                prompt,
+                generation_config={"temperature": 0.2, "max_output_tokens": max_tokens, "top_p": 0.8}
+            )
+            return response.text.strip()
         except Exception as e:
             logger.error(f"LLM応答生成エラー: {e}")
             return ""
@@ -1121,24 +1110,15 @@ Frequent Word 2; 80
 """
         
         try:
-            if "gemini" in self.model_name:
-                response = self.llm_model.generate_content(
-                    prompt,
-                    generation_config={
-                        "temperature": 0.4,
-                        "max_output_tokens": 800,
-                        "top_p": 0.9
-                    }
-                )
-                return response.text.strip()
-            else:
-                response = self.llm_model.predict(
-                    prompt,
-                    temperature=0.4,
-                    max_output_tokens=800,
-                    top_p=0.9
-                )
-                return response.text.strip()
+            response = self.llm_model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.4,
+                    "max_output_tokens": 800,
+                    "top_p": 0.9
+                }
+            )
+            return response.text.strip()
                 
         except Exception as e:
             logger.error(f"❌ LLM分析エラー: {e}")
@@ -1552,24 +1532,15 @@ Frequent Word 2; 80
 }}"""
         
         try:
-            if "gemini" in self.model_name:
-                response = self.llm_model.generate_content(
-                    prompt,
-                    generation_config={
-                        "temperature": 0,  # 一貫性のため
-                        "max_output_tokens": 400,
-                        "top_p": 0.8
-                    }
-                )
-                response_text = response.text.strip()
-            else:
-                response = self.llm_model.predict(
-                    prompt,
-                    temperature=0,
-                    max_output_tokens=400,
-                    top_p=0.8
-                )
-                response_text = response.text.strip()
+            response = self.llm_model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0,  # 一貫性のため
+                    "max_output_tokens": 400,
+                    "top_p": 0.8
+                }
+            )
+            response_text = response.text.strip()
             
             # JSONを抽出（マークダウンコードブロックに対応）
             if "```json" in response_text:
